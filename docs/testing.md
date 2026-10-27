@@ -22,8 +22,9 @@
 | One rule | `cd backend && npm test -- -t "BR-07"` | same |
 | Concurrency stress (10 runs) | `cd backend && for i in $(seq 10); do npm test -- concurrency \|\| exit 1; done` | same |
 | Coverage | `cd backend && npm test -- --coverage` | same |
-| API container + demo data to try by hand | `docker compose up --build -d api`, then `docker compose exec api npm run seed:demo`; Swagger UI at `http://127.0.0.1:3000/api/docs` | `.env` with `SEED_ON_START=true` and the seed passwords (D-27, D-28) |
-| Frontend unit | `cd frontend && npm test` | — |
+| Full stack + demo data to try by hand | `docker compose up --build -d`, then `docker compose exec api npm run seed:demo`; the app at `http://localhost:8080`, Swagger UI at `http://localhost:8080/api/docs` | `.env` with `SEED_ON_START=true` and the seed passwords (D-27, D-32) |
+| Frontend unit | `cd frontend && npm ci && npm test` | — |
+| Frontend dev server | `cd frontend && npm run dev` (http://localhost:5173) | full stack running; API calls go through its nginx on `WEB_PORT` |
 | End-to-end | `npm ci && npx playwright install chromium && npm run test:e2e` (repo root) | full stack running: `docker compose up --build -d`; demo passwords in `.env` |
 
 ## 3. Test catalogue
