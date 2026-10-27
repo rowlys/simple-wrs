@@ -18,20 +18,25 @@ const toProduct = ({ balance, ...p }: ProductRow & { balance: InventoryBalance |
   updatedAt: p.updatedAt,
 });
 
+// FR-10, FR-40: case-insensitive partial match on SKU or name, wildcards taken literally (D-14). No text, no filter.
+export function productSearch(search?: string): Prisma.ProductWhereInput {
+  const text = search && escapeLike(search);
+  return text
+    ? {
+        OR: [
+          { sku: { contains: text, mode: 'insensitive' } },
+          { name: { contains: text, mode: 'insensitive' } },
+        ],
+      }
+    : {};
+}
+
 @Injectable()
 export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list({ search, ...pageQuery }: ListProductsQuery): Promise<Page<Product>> {
-    const text = search && escapeLike(search);
-    const where: Prisma.ProductWhereInput = text
-      ? {
-          OR: [
-            { sku: { contains: text, mode: 'insensitive' } },
-            { name: { contains: text, mode: 'insensitive' } },
-          ],
-        }
-      : {};
+    const where = productSearch(search);
     const page = await paginate(
       pageQuery,
       (args) =>
