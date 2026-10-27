@@ -122,7 +122,7 @@ describe('auth (US-01)', () => {
     expect(new Set(fields)).toEqual(new Set(['username', 'password']));
   });
 
-  it('spec §4.3 a malformed JSON body gets 400 VALIDATION_ERROR', async () => {
+  it('T-API-02 spec §4.3 a malformed JSON body gets 400 VALIDATION_ERROR', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('Content-Type', 'application/json')
@@ -132,7 +132,7 @@ describe('auth (US-01)', () => {
     expect(res.body).toEqual({ error: { code: 'VALIDATION_ERROR', message: expect.any(String), details: { fields: [] } } });
   });
 
-  it('spec §4.3 a body over the parser limit (100 kB) gets 400 VALIDATION_ERROR, not 500', async () => {
+  it('T-API-02 spec §4.3 a body over the parser limit (100 kB) gets 400 VALIDATION_ERROR, not 500', async () => {
     const res = await login({ username: 'operator', password: 'x'.repeat(200_000) });
 
     expect(res.status).toBe(400);
@@ -141,7 +141,7 @@ describe('auth (US-01)', () => {
     });
   });
 
-  it('spec §4.3 an unknown route gets the 404 NOT_FOUND envelope', async () => {
+  it('T-API-02 spec §4.3 an unknown route gets the 404 NOT_FOUND envelope', async () => {
     const res = await request(app.getHttpServer()).get('/api/v1/does-not-exist');
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: { code: 'NOT_FOUND', message: expect.any(String) } });

@@ -11,7 +11,7 @@ describe('config (spec §8, §10)', () => {
     JWT_SECRET: 's'.repeat(32),
   };
 
-  it('spec §10 applies the defaults JWT_EXPIRES_IN=8h and PORT=3000', () => {
+  it('NFR-02 spec §10 applies the defaults JWT_EXPIRES_IN=8h and PORT=3000', () => {
     expect(loadConfig(valid)).toEqual({
       databaseUrl: valid.DATABASE_URL,
       jwtSecret: valid.JWT_SECRET,
