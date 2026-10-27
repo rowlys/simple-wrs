@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { AppError } from './app-error';
 import { ErrorCode } from './error-code';
+import { uniqueViolation } from './prisma-errors';
 
 // P2002 meta in Prisma 6 is { modelName, target: [db column names] }, not the constraint name
 // (observed against the real schema, docs/ai-workflow.md §6), so the key is model + columns.
@@ -27,12 +28,8 @@ function toAppError(exception: unknown): AppError | undefined {
 
   if (exception instanceof Prisma.PrismaClientKnownRequestError) {
     if (exception.code === 'P2025') return new AppError(ErrorCode.NOT_FOUND, 'Resource not found.');
-    if (exception.code === 'P2002') {
-      const { modelName, target } = (exception.meta ?? {}) as { modelName?: string; target?: unknown };
-      const known = UNIQUE_VIOLATIONS[`${modelName}:${Array.isArray(target) ? target.join(',') : target}`];
-      if (known) return new AppError(...known);
-    }
-    return undefined;
+    const known = UNIQUE_VIOLATIONS[uniqueViolation(exception) ?? ''];
+    return known && new AppError(...known);
   }
 
   if (exception instanceof HttpException) {

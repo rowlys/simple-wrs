@@ -12,14 +12,15 @@ import {
   Receipt,
   ReceivingDocumentDetail,
   ReceivingDocumentSummary,
+  ReceivingItem,
   ReceivingItemInput,
 } from './dto/receiving-document.dto';
 
 type Tx = Prisma.TransactionClient;
 
-const TX_OPTIONS = { timeout: 10_000 }; // spec §6 step 4; READ COMMITTED is the PostgreSQL default
+export const TX_OPTIONS = { timeout: 10_000 }; // spec §6 step 4; READ COMMITTED is the PostgreSQL default
 
-const userRef = { select: { id: true, fullName: true } } as const;
+export const userRef = { select: { id: true, fullName: true } } as const;
 
 // shortcut: loads every line's quantities to count and sum them in JS (at most 100 documents × 200 lines);
 // switch to receivingItem.groupBy for the page's ids if the list ever misses NFR-04's 500 ms.
@@ -28,7 +29,7 @@ const SUMMARY_INCLUDE = {
   items: { select: { expectedQuantity: true, receivedQuantity: true } },
 } satisfies Prisma.ReceivingDocumentInclude;
 
-const DETAIL_INCLUDE = {
+export const DETAIL_INCLUDE = {
   createdBy: userRef,
   openedBy: userRef,
   completedBy: userRef,
@@ -41,7 +42,7 @@ const DETAIL_INCLUDE = {
   },
 } satisfies Prisma.ReceivingDocumentInclude;
 
-const RECEIPT_INCLUDE = {
+export const RECEIPT_INCLUDE = {
   receivedBy: userRef,
   reversal: { include: { reversedBy: userRef } },
   receivingItem: { select: { product: { select: { sku: true } } } },
@@ -55,6 +56,10 @@ type ReceiptRow = Prisma.ReceiptGetPayload<{ include: typeof RECEIPT_INCLUDE }>;
 export const formatDocumentNumber = (year: number, seq: bigint) => `RCV-${year}-${String(seq).padStart(6, '0')}`;
 
 const sum = (values: number[]) => values.reduce((total, n) => total + n, 0);
+
+// FR-34: every line fully received (a document without lines never is).
+export const allReceived = (items: { expectedQuantity: number; receivedQuantity: number }[]) =>
+  items.length > 0 && items.every((i) => i.receivedQuantity === i.expectedQuantity);
 
 const toSummary = (doc: SummaryRow): ReceivingDocumentSummary => ({
   id: doc.id,
@@ -71,7 +76,7 @@ const toSummary = (doc: SummaryRow): ReceivingDocumentSummary => ({
   createdBy: doc.createdBy,
 });
 
-const toReceipt = (r: ReceiptRow): Receipt => ({
+export const toReceipt = (r: ReceiptRow): Receipt => ({
   id: r.id,
   receivingItemId: r.receivingItemId,
   productSku: r.receivingItem.product.sku,
@@ -86,19 +91,21 @@ const toReceipt = (r: ReceiptRow): Receipt => ({
   },
 });
 
+export const toItem = ({ id, product, expectedQuantity, receivedQuantity }: DetailRow['items'][number]): ReceivingItem => ({
+  id,
+  product,
+  expectedQuantity,
+  receivedQuantity,
+  remainingQuantity: expectedQuantity - receivedQuantity,
+  isFullyReceived: receivedQuantity === expectedQuantity,
+});
+
 const toDetail = (doc: DetailRow, receipts: ReceiptRow[]): ReceivingDocumentDetail => {
-  const items = doc.items.map(({ id, product, expectedQuantity, receivedQuantity }) => ({
-    id,
-    product,
-    expectedQuantity,
-    receivedQuantity,
-    remainingQuantity: expectedQuantity - receivedQuantity,
-    isFullyReceived: receivedQuantity === expectedQuantity,
-  }));
+  const items = doc.items.map(toItem);
   return {
     ...toSummary(doc),
     notes: doc.notes,
-    allItemsReceived: items.length > 0 && items.every((i) => i.isFullyReceived),
+    allItemsReceived: allReceived(doc.items),
     items,
     receipts: receipts.map(toReceipt),
     openedAt: doc.openedAt,
@@ -124,7 +131,7 @@ async function assertProductsExist(tx: Tx, productIds: string[]): Promise<void> 
 
 // Locks the document row (spec §6: always the first lock, so every change to one document is serialized)
 // and returns its status with the transaction's database time, used for every timestamp it writes.
-async function lockDocument(tx: Tx, id: string): Promise<{ status: ReceivingStatus; now: Date }> {
+export async function lockDocument(tx: Tx, id: string): Promise<{ status: ReceivingStatus; now: Date }> {
   const [doc] = await tx.$queryRaw<{ status: ReceivingStatus; now: Date }[]>`
     SELECT status, now() AS now FROM receiving_documents WHERE id = ${id}::uuid FOR UPDATE`;
   if (!doc) throw new AppError(ErrorCode.NOT_FOUND, 'Receiving document not found.');

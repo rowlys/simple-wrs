@@ -1,24 +1,36 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { CurrentUser, Roles } from '../../common/auth/decorators';
 import { AuthUser } from '../../common/auth/jwt-auth.guard';
+import { AppError } from '../../common/errors/app-error';
+import { ErrorCode } from '../../common/errors/error-code';
 import { Page } from '../../common/pagination/pagination';
 import {
   CreateReceivingDocumentRequest,
   ListReceivingDocumentsQuery,
   ReasonRequest,
+  ReceiptResult,
   ReceivingDocumentDetail,
   ReceivingDocumentSummary,
   ReceivingItemInput,
+  RecordReceiptRequest,
   UpdateReceivingItemRequest,
 } from './dto/receiving-document.dto';
+import { ReceiptsService } from './receipts.service';
 import { ReceivingDocumentsService } from './receiving-documents.service';
 
 const DocumentId = () => Param('documentId', ParseUUIDPipe);
 const ItemId = () => Param('itemId', ParseUUIDPipe);
 
+// BR-09, OpenAPI Idempotency-Key header.
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{8,100}$/;
+
 @Controller('receiving-documents')
 export class ReceivingDocumentsController {
-  constructor(private readonly documents: ReceivingDocumentsService) {}
+  constructor(
+    private readonly documents: ReceivingDocumentsService,
+    private readonly receipts: ReceiptsService,
+  ) {}
 
   @Get()
   list(@Query() query: ListReceivingDocumentsQuery): Promise<Page<ReceivingDocumentSummary>> {
@@ -82,6 +94,27 @@ export class ReceivingDocumentsController {
     @CurrentUser() user: AuthUser,
   ): Promise<ReceivingDocumentDetail> {
     return this.documents.closeShort(documentId, body.reason, user);
+  }
+
+  // FR-30, spec §6. 201 for a new receipt; 200 with Idempotent-Replayed: true for a replay (BR-09).
+  @Post(':documentId/items/:itemId/receipts')
+  @Roles('OPERATOR', 'SUPERVISOR')
+  async recordReceipt(
+    @DocumentId() documentId: string,
+    @ItemId() itemId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() body: RecordReceiptRequest,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<ReceiptResult> {
+    if (!idempotencyKey || !IDEMPOTENCY_KEY.test(idempotencyKey)) {
+      throw new AppError(ErrorCode.VALIDATION_ERROR, 'Request validation failed.', {
+        fields: [{ field: 'Idempotency-Key', message: 'Idempotency-Key must be 8–100 characters of A–Z, a–z, 0–9, _ or -' }],
+      });
+    }
+    const { result, replayed } = await this.receipts.recordReceipt({ documentId, itemId, quantity: body.quantity, idempotencyKey }, user);
+    if (replayed) res.status(200).setHeader('Idempotent-Replayed', 'true');
+    return result;
   }
 
   @Post(':documentId/cancel')

@@ -66,6 +66,14 @@ export class CreateReceivingDocumentRequest {
   items: ReceivingItemInput[] = [];
 }
 
+// BR-07: a positive whole number; the upper bound is the largest line (BR-05).
+export class RecordReceiptRequest {
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  quantity!: number;
+}
+
 // BR-15, BR-17: cancel and close short.
 export class ReasonRequest {
   @Transform(trim)
@@ -130,6 +138,13 @@ export interface Receipt {
   receivedAt: Date;
   receivedBy: UserRef;
   reversal: ReceiptReversal | null;
+}
+
+export interface ReceiptResult {
+  receipt: Receipt;
+  item: ReceivingItem;
+  document: { id: string; documentNumber: string; status: ReceivingStatus; allItemsReceived: boolean };
+  inventory: { productId: string; quantityOnHand: number };
 }
 
 export interface ReceivingDocumentDetail extends ReceivingDocumentSummary {
