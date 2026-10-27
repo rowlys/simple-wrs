@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.test
+backend/jest.json
+playwright-report/
+test-results/
+.claude/settings.local.json
