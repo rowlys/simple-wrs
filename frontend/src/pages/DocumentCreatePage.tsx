@@ -6,7 +6,7 @@ import { useDocumentMutation } from '../api/query-client';
 import { useCurrentUser } from '../auth/AuthProvider';
 import { can } from '../auth/permissions';
 import { ErrorAlert } from '../components/ErrorAlert';
-import { ProductSelect } from '../components/ProductSelect';
+import { ProductSelect } from '../components/SearchSelect';
 
 interface Line {
   key: number;

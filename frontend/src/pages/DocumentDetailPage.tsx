@@ -10,7 +10,7 @@ import { useCurrentUser } from '../auth/AuthProvider';
 import { canOnDocument } from '../auth/permissions';
 import { DocumentActions } from '../components/DocumentActions';
 import { ErrorAlert, errorMessage } from '../components/ErrorAlert';
-import { ProductSelect } from '../components/ProductSelect';
+import { ProductSelect } from '../components/SearchSelect';
 import { ReasonModal } from '../components/ReasonModal';
 import { ReceiveForm } from '../components/ReceiveForm';
 import { StatusBadge } from '../components/StatusBadge';

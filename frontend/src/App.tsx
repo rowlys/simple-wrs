@@ -4,8 +4,10 @@ import { Layout } from './components/Layout';
 import { DocumentCreatePage } from './pages/DocumentCreatePage';
 import { DocumentDetailPage } from './pages/DocumentDetailPage';
 import { DocumentsPage } from './pages/DocumentsPage';
+import { InventoryPage } from './pages/InventoryPage';
 import { LoginPage } from './pages/LoginPage';
 import { ProductsPage } from './pages/ProductsPage';
+import { TransactionsPage } from './pages/TransactionsPage';
 
 // Spec §1.3 routes; the default after login is /receiving.
 export function App() {
@@ -18,6 +20,8 @@ export function App() {
           <Route path="/receiving/new" element={<DocumentCreatePage />} />
           <Route path="/receiving/:id" element={<DocumentDetailPage />} />
           <Route path="/products" element={<ProductsPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/inventory/transactions" element={<TransactionsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/receiving" replace />} />

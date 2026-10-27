@@ -6,6 +6,8 @@ import { useAuth, useCurrentUser } from '../auth/AuthProvider';
 const LINKS: { to: string; label: string; end?: boolean }[] = [
   { to: '/receiving', label: 'Receiving' },
   { to: '/products', label: 'Products' },
+  { to: '/inventory', label: 'Inventory', end: true },
+  { to: '/inventory/transactions', label: 'Transactions' },
 ];
 
 export function Layout() {

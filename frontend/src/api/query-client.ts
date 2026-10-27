@@ -14,7 +14,8 @@ export const queryClient = new QueryClient({
 
 /**
  * After a write: refetch what it may have changed (spec §5: documents, stock, ledger, on-hand on products).
- * Product pickers are left alone, and so is a document whose fresh copy the write already returned.
+ * Product pickers are left alone (no write here changes a SKU or name), and so is a document whose fresh copy
+ * the write already returned.
  */
 export function refreshAfterWrite(client: QueryClient, freshDocumentId?: string): void {
   void client.invalidateQueries({

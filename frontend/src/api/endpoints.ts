@@ -2,6 +2,8 @@ import { request } from './client';
 import type {
   CreateProductRequest,
   CreateReceivingDocumentRequest,
+  InventoryBalance,
+  InventoryTransaction,
   Page,
   PageQuery,
   Product,
@@ -53,3 +55,9 @@ export const recordReceipt = (documentId: string, itemId: string, quantity: numb
 // reverseReceipt
 export const reverseReceipt = (documentId: string, receiptId: string, reason: string) =>
   request<ReceivingDocumentDetail>('POST', `${doc(documentId)}/receipts/${receiptId}/reverse`, { body: { reason } });
+
+// listInventory
+export const listInventory = (query: PageQuery) => request<Page<InventoryBalance>>('GET', '/inventory', { query: { ...query } });
+// listInventoryTransactions; from (inclusive) and to (exclusive) are RFC 3339 date-times with an offset (D-25).
+export const listTransactions = (query: Omit<PageQuery, 'search'> & { productId?: string; receivingDocumentId?: string; from?: string; to?: string }) =>
+  request<Page<InventoryTransaction>>('GET', '/inventory/transactions', { query: { ...query } });
