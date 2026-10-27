@@ -1,0 +1,7 @@
+# Build context is the repository root (the API image also needs docs/openapi.yaml).
+**/node_modules
+**/dist
+**/coverage
+.git
+.env
+**/.env.test
