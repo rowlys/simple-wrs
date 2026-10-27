@@ -71,7 +71,7 @@ One row per instruction, oldest first.
 
 | # | Date | Instruction | Requirement IDs | Commits | Result |
 |---|---|---|---|---|---|
-| 1 | 2026-10-27 | Let the agent commit finished changes without asking | — | not committed | done |
+| 1 | 2026-10-27 | Let the agent commit finished changes without asking | — | a1ecda2 | done |
 
 Result is one of: done, partial (say what is left), rejected (say why).
 
