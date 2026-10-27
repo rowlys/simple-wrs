@@ -22,7 +22,7 @@
 | ORM / migrations | Prisma | 6.x | `prisma migrate` for versioned SQL migrations; raw SQL for row locks and CHECK constraints |
 | Database | PostgreSQL | 16 | |
 | Validation | class-validator + class-transformer | latest | Global `ValidationPipe` with `whitelist`, `forbidNonWhitelisted`, `transform` |
-| Auth | @nestjs/jwt + passport-jwt, bcrypt | latest | HS256 access token, no refresh token |
+| Auth | @nestjs/jwt, bcrypt | latest | HS256 access token, no refresh token |
 | API docs | `docs/openapi.yaml` (hand-written, contract-first) | OpenAPI 3.1 | Served read-only at `/api/docs` via Swagger UI |
 | Backend tests | Jest + Supertest | latest | Integration tests run against a real PostgreSQL test database |
 | Frontend | React 19 + Vite + TypeScript | latest | |
@@ -266,7 +266,7 @@ CREATE INDEX it_created_at_idx ON inventory_transactions (created_at DESC);
 4. Every later schema change is a new migration folder; applied migrations are never edited.
 5. Production/container start runs `prisma migrate deploy` (applies pending migrations only, never resets, safe to run repeatedly).
 6. Seeding (`prisma/seed.ts`) uses upserts keyed on `username` and `sku`, so it can run on every start without duplicating data. It runs only when `SEED_ON_START=true`.
-7. Tests use a separate database (`DATABASE_URL` pointing at `wrs_test`); the Jest global setup runs `prisma migrate reset --force --skip-seed` once, and each test file truncates tables in `beforeEach`.
+7. Tests use a separate database (`DATABASE_URL` pointing at `wrs_test`); the Jest global setup refuses to run unless the database name ends in `_test`, then runs `prisma migrate deploy` once, and each test file truncates tables in `beforeEach`.
 
 ### 3.4 Seed data
 

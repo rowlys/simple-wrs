@@ -72,6 +72,7 @@ One row per instruction, oldest first.
 | # | Date | Instruction | Requirement IDs | Commits | Result |
 |---|---|---|---|---|---|
 | 1 | 2026-10-27 | Let the agent commit finished changes without asking | — | a1ecda2 | done |
+| 2 | 2026-10-27 | Create the app foundations: database schema, backend skeleton, seed, test setup, auth and guards | NFR-01, NFR-02, NFR-05, NFR-09, FR-01–FR-03, FR-12, FR-50, A-08, AC-01.1–AC-01.4, AC-09.1–AC-09.2; T-DB-01–03, T-AUT-01–03, T-API-02, T-HLT-01 | 37002dc, 1e577f0, docs commit | partial: T-AUT-04 waits for the supervisor-only endpoints (FR-03 / AC-01.4 covered through a test-only controller); no Dockerfiles, Swagger UI or frontend yet |
 
 Result is one of: done, partial (say what is left), rejected (say why).
 
@@ -81,7 +82,17 @@ Details the PRD and technical spec leave open, resolved with the simplest option
 
 | ID | Date | From instruction # | Decision | Why | Affects |
 |---|---|---|---|---|---|
-| | | | | | |
+| D-01 | 2026-10-27 | 2 | JWT is verified by a plain global guard using `JwtService` from `@nestjs/jwt`, without `passport-jwt` / `@nestjs/passport` (spec §0 lists passport-jwt). Signing and verification are pinned to HS256. | Same behaviour as spec §8 with three fewer dependencies and no strategy boilerplate (user approved, spec §0 amended). | `src/common/auth/`, `src/modules/auth/` |
+| D-02 | 2026-10-27 | 2 | Seed runner: `npm run seed` runs `prisma/seed.ts` directly with Node 22's built-in type stripping (`node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.ts`). No build step and no `package.json#prisma.seed` (deprecated in Prisma 6). The seed must stay erasable TypeScript only. | Works unchanged in the `node:22-alpine` runtime image, which must be Node ≥ 22.18 (type stripping on by default). | `prisma/seed.ts`, `package.json`, future `backend/Dockerfile` |
+| D-03 | 2026-10-27 | 2 | The test setup loads `backend/.env.test` and throws unless the database name in `DATABASE_URL` ends with `_test`. | The tests truncate every table of that database; this protects the dev database. | `test/env.ts`, `test/global-setup.ts` |
+| D-04 | 2026-10-27 | 2 | Prisma 6.19 reports P2002 as `meta = { modelName, target: [db column names] }`, not the constraint name, so the filter maps `Product:sku`, `ReceivingItem:receiving_document_id,product_id` and `ReceiptReversal:receipt_id` (observed against the real schema). A unique violation from `$executeRaw` arrives as P2010 / `23505` with no constraint name and becomes a 500. | Mapping on what Prisma actually returns. Consequence: inserts that rely on these mappings (e.g. the reversal insert, spec §6.2 step 10) must use the Prisma client, not raw SQL. | `src/common/errors/all-exceptions.filter.ts` |
+| D-05 | 2026-10-27 | 2 | Init migration hand-edited beyond §3.3 step 3 so the database equals the §3.2 DDL exactly: unique indexes turned into `UNIQUE` constraints, `CURRENT_TIMESTAMP` defaults into `now()`, `BIGSERIAL` into `GENERATED ALWAYS AS IDENTITY`. Checked: `pg_dump --schema-only` of the migrated DB and of the DDL run directly are identical; `prisma migrate diff` reports no difference, so a later `migrate dev` does not try to drop the CHECKs, expression indexes or sequence. | §3.2 is authoritative ("must produce exactly this"). | `prisma/migrations/*_init/migration.sql` |
+| D-06 | 2026-10-27 | 2 | `VALIDATION_ERROR` `details.fields` holds one `{field, message}` entry per failed constraint; nested fields use a dotted path (`items.1.quantity`). Other 400s (malformed JSON, a Nest pipe, a body-parser client error such as 413 body too large) are also `VALIDATION_ERROR` with `details.fields: []`. | Spec §4.2 fixes the shape but not these cases; §4.3 puts every malformed request at 400 and has no 413. | `src/common/errors/` |
+| D-07 | 2026-10-27 | 2 | Seed upserts: an existing user gets `fullName`, `role` and a fresh hash of the current env password; an existing product is left untouched (its balance is created only with the product, in the same nested write). | The env vars stay the source of truth for demo passwords (A-08); stock never changes outside `ReceiptsService`. | `prisma/seed.ts` |
+| D-08 | 2026-10-27 | 2 | `PrismaService` does not connect on module init; Prisma connects on the first query. | The API can start and `/health` can answer 503 while the database is down. | `src/prisma/prisma.service.ts` |
+| D-09 | 2026-10-27 | 2 | `GET /auth/me` reads the user from the database; a valid token for a user that no longer exists gets 401 `UNAUTHENTICATED`. | `User.fullName` is not in the token. | `src/modules/auth/` |
+| D-10 | 2026-10-27 | 2 | `main.ts` exports `configureApp()` (global prefix + request logger), used by bootstrap and by the integration tests; guards, the validation pipe and the filter are `APP_*` providers in `AppModule`. `nest build` compiles `src/` only, so the entry point is `dist/main.js` (spec §11). | Tests run exactly the app that ships, with no copy of the setup. | `src/main.ts`, `src/app.module.ts`, `tsconfig.build.json` |
+| D-11 | 2026-10-27 | 2 | The Jest global setup runs `prisma migrate deploy` (after the `_test` guard) instead of `prisma migrate reset --force --skip-seed`; each test file still truncates the tables in `beforeEach`. User decision. | Prisma 6.19 refuses `migrate reset` when run by an AI agent without the user's consent, so the agent could not run the suite. | spec §3.3 step 7, `test/global-setup.ts` |
 
 ## 7. Where the AI was wrong
 
@@ -89,7 +100,8 @@ Mistakes the agent made, how they were caught, and how they were fixed.
 
 | # | Date | What was wrong | How it was caught | Fix |
 |---|---|---|---|---|
-| | | | | |
+| 1 | 2026-10-27 | `.env.example` shipped a 42-character `JWT_SECRET` placeholder, which passes the ≥ 32 check: an unedited copy would start the API with a public secret, so anyone could sign a SUPERVISOR token. | `/code-review` (instruction #2) | Placeholder shortened below 32 characters; test `NFR-02 the JWT_SECRET placeholder in .env.example is rejected…` fails if it is lengthened again |
+| 2 | 2026-10-27 | `engines` allowed Node 22.0–22.17, where `npm run seed` (`node prisma/seed.ts`) fails because type stripping is on by default only from 22.18. | `/code-review` (instruction #2) | `engines.node` set to `>=22.18 <23` |
 
 ## 8. Evidence
 
