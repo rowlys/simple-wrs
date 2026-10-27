@@ -7,10 +7,11 @@ import { createValidationPipe } from './common/errors/validation';
 import { ConfigModule } from './config/config.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { ProductsModule } from './modules/products/products.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [ConfigModule, PrismaModule, AuthModule, HealthModule],
+  imports: [ConfigModule, PrismaModule, AuthModule, HealthModule, ProductsModule],
   providers: [
     // Guard order matters: authentication first, then the role check.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
