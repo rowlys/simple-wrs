@@ -74,7 +74,7 @@ export class RecordReceiptRequest {
   quantity!: number;
 }
 
-// BR-15, BR-17: cancel and close short.
+// BR-15, BR-17: the body of cancel, close short and receipt reversal.
 export class ReasonRequest {
   @Transform(trim)
   @IsString()

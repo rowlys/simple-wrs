@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { createTestApp, createUsersAndLogin, TestUsers } from './app';
 import { assertInventoryConsistent, truncateAll } from './db';
-import { receive } from './fixtures';
+import { receive, reverse } from './fixtures';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('receiving documents (US-03, US-05, US-07)', () => {
@@ -231,13 +231,13 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
       expect(res.body).toEqual(created);
     });
 
-    // The reversal shown on a receipt is tested with the reverse endpoint (T-REV-01), which does not exist yet.
-    it('FR-23 FR-34 lists receipts oldest first with SKU and user; per-line and document received flags', async () => {
+    it('FR-23 FR-34 lists receipts oldest first with SKU, user and reversal; per-line and document received flags', async () => {
       const doc = await draft(10, 5);
       await setState(doc.id, 'IN_PROGRESS', [10, 3]);
       const [first, second] = doc.items.map((i: { id: string }) => i.id);
       const older = await prisma.receipt.findFirstOrThrow({ where: { receivingItemId: first } });
       const newer = await prisma.receipt.findFirstOrThrow({ where: { receivingItemId: second } });
+      expect((await reverse(app, users.supervisor.token, doc.id, newer.id, { reason: 'Typo' })).status).toBe(200);
 
       const res = await api('get', `/${doc.id}`, 'operator');
 
@@ -250,15 +250,15 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
           quantity: 3,
           receivedAt: newer.receivedAt.toISOString(),
           receivedBy: { id: users.operator.id, fullName: 'operator' },
-          reversal: null,
+          reversal: { id: uuid, reason: 'Typo', reversedAt: isoDate, reversedBy: { id: users.supervisor.id, fullName: 'supervisor' } },
         },
       ]);
       expect(res.body.items.map((i: { isFullyReceived: boolean; remainingQuantity: number }) => [i.isFullyReceived, i.remainingQuantity])).toEqual([
         [true, 0],
-        [false, 2],
+        [false, 5],
       ]);
       expect(res.body.allItemsReceived).toBe(false);
-      expect(res.body.totalReceivedQuantity).toBe(13);
+      expect(res.body.totalReceivedQuantity).toBe(10);
 
       await setState(doc.id, 'IN_PROGRESS', [10, 5]);
       expect((await api('get', `/${doc.id}`)).body.allItemsReceived).toBe(true);
@@ -657,6 +657,7 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
         await api('post', `/${doc.id}/complete`, 'operator'),
         await api('post', `/${doc.id}/close-short`, 'operator').send({ reason: 'Supplier out of stock' }),
         await api('post', `/${doc.id}/cancel`, 'operator').send({ reason: 'Supplier cancelled' }),
+        await api('post', `/${doc.id}/receipts/${randomUUID()}/reverse`, 'operator').send({ reason: 'Typo, counted 10' }),
       ];
 
       expect(results.map((res) => [res.status, res.body.error?.code])).toEqual(results.map(() => [403, 'FORBIDDEN']));

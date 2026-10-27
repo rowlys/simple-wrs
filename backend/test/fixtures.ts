@@ -40,3 +40,6 @@ export const receive = (
   const req = api(app, token).post(`/receiving-documents/${documentId}/items/${itemId}/receipts`);
   return (key === null ? req : req.set('Idempotency-Key', key)).send({ quantity });
 };
+
+export const reverse = (app: INestApplication, token: string, documentId: string, receiptId: string, body: object = { reason: 'Typo, counted 10' }) =>
+  api(app, token).post(`/receiving-documents/${documentId}/receipts/${receiptId}/reverse`).send(body);

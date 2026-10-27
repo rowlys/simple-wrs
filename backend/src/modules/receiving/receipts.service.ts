@@ -6,8 +6,17 @@ import { ErrorCode } from '../../common/errors/error-code';
 import { uniqueViolation } from '../../common/errors/prisma-errors';
 import { PrismaService } from '../../prisma/prisma.service';
 import { assertCan } from './document-state';
-import { ReceiptResult } from './dto/receiving-document.dto';
-import { allReceived, DETAIL_INCLUDE, lockDocument, RECEIPT_INCLUDE, toItem, toReceipt, TX_OPTIONS } from './receiving-documents.service';
+import { ReceiptResult, ReceivingDocumentDetail } from './dto/receiving-document.dto';
+import {
+  allReceived,
+  DETAIL_INCLUDE,
+  documentDetail,
+  lockDocument,
+  RECEIPT_INCLUDE,
+  toItem,
+  toReceipt,
+  TX_OPTIONS,
+} from './receiving-documents.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -43,6 +52,19 @@ async function receiptResult(db: Tx, receiptId: string): Promise<ReceiptResult> 
   };
 }
 
+type StockMove = { productId: string; quantityChange: number; receivingDocumentId: string; createdById: string; createdAt: Date } &
+  ({ type: 'RECEIPT'; receiptId: string } | { type: 'RECEIPT_REVERSAL'; receiptReversalId: string });
+
+// The one place stock moves (spec §5): the balance row, locked by this UPDATE as the last lock (BR-14), and the
+// ledger row with the balance it left (BR-12). A reversal passes a negative quantityChange.
+async function moveStock(tx: Tx, move: StockMove): Promise<void> {
+  const { quantityOnHand } = await tx.inventoryBalance.update({
+    where: { productId: move.productId },
+    data: { quantityOnHand: { increment: move.quantityChange }, updatedAt: move.createdAt },
+  });
+  await tx.inventoryTransaction.create({ data: { ...move, balanceAfter: quantityOnHand } });
+}
+
 // Spec §6 step 5 (BR-09): the id of the receipt already recorded with this key for this same request, or null
 // when the key is new. A key used for another line or quantity is 409 (D-21: the line must be on this document).
 async function replayedReceipt(db: Tx, { documentId, itemId, quantity, idempotencyKey }: ReceiptRequest): Promise<string | null> {
@@ -57,7 +79,7 @@ async function replayedReceipt(db: Tx, { documentId, itemId, quantity, idempoten
   return earlier.id;
 }
 
-// The only code that changes stock (spec §5): FR-31 receipts. Reversals (FR-37) come with their own instruction.
+// The only code that changes stock (spec §5): receipts (FR-31) and their reversals (FR-37).
 @Injectable()
 export class ReceiptsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -81,6 +103,51 @@ export class ReceiptsService {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
     });
     return { result, replayed: true };
+  }
+
+  // FR-36, FR-37, spec §6.2: undoes one whole receipt with a new reversal row and a negative ledger row; the
+  // receipt and its RECEIPT row are never changed. Lock order document → item → balance (BR-14).
+  reverseReceipt(documentId: string, receiptId: string, reason: string, user: AuthUser): Promise<ReceivingDocumentDetail> {
+    return this.prisma.$transaction(async (tx) => {
+      const { now, status } = await lockDocument(tx, documentId);
+      assertCan('REVERSE', status); // BR-18
+
+      // Steps 7–9: the receipt only through its own document (BR-18), whether it is reversed, and the line lock.
+      const [receipt] = await tx.$queryRaw<{ quantity: number; itemId: string; productId: string; reversed: boolean }[]>`
+        SELECT r.quantity, r.receiving_item_id AS "itemId", ri.product_id AS "productId", rv.id IS NOT NULL AS reversed
+        FROM receipts r
+        JOIN receiving_items ri ON ri.id = r.receiving_item_id
+        LEFT JOIN receipt_reversals rv ON rv.receipt_id = r.id
+        WHERE r.id = ${receiptId}::uuid AND ri.receiving_document_id = ${documentId}::uuid
+        FOR UPDATE OF ri`;
+      if (!receipt) throw new AppError(ErrorCode.NOT_FOUND, 'Receipt not found on this document.');
+      if (receipt.reversed) throw new AppError(ErrorCode.RECEIPT_ALREADY_REVERSED, 'This receipt has already been reversed.'); // BR-19
+
+      const { quantity, itemId, productId } = receipt;
+      // Prisma client, so the unique receipt_id backstop maps to 409 RECEIPT_ALREADY_REVERSED in the filter (D-04).
+      const reversal = await tx.receiptReversal.create({ data: { receiptId, reason, reversedById: user.id, reversedAt: now } });
+      const line = await tx.receivingItem.update({
+        where: { id: itemId },
+        data: { receivedQuantity: { decrement: quantity }, updatedAt: now },
+      });
+      await moveStock(tx, {
+        type: 'RECEIPT_REVERSAL',
+        receiptReversalId: reversal.id,
+        productId,
+        quantityChange: -quantity,
+        receivingDocumentId: documentId,
+        createdById: user.id,
+        createdAt: now,
+      });
+      // A-15: nothing received any more → back to OPEN; opened_at and opened_by keep their values.
+      const nothingReceived =
+        line.receivedQuantity === 0 &&
+        !(await tx.receivingItem.count({ where: { receivingDocumentId: documentId, receivedQuantity: { gt: 0 } } }));
+      if (nothingReceived) {
+        await tx.receivingDocument.update({ where: { id: documentId }, data: { status: 'OPEN', updatedAt: now } });
+      }
+      return documentDetail(tx, documentId);
+    }, TX_OPTIONS);
   }
 
   // Spec §6 steps 5–14; returns the new receipt's result, or the id of the receipt this request replays.
@@ -117,21 +184,14 @@ export class ReceiptsService {
       data: { receivingItemId: itemId, quantity, idempotencyKey, receivedById: user.id, receivedAt: now },
     });
     await tx.receivingItem.update({ where: { id: itemId }, data: { receivedQuantity: { increment: quantity }, updatedAt: now } });
-    const { quantityOnHand } = await tx.inventoryBalance.update({
-      where: { productId: item.productId },
-      data: { quantityOnHand: { increment: quantity }, updatedAt: now },
-    });
-    await tx.inventoryTransaction.create({
-      data: {
-        productId: item.productId,
-        type: 'RECEIPT',
-        quantityChange: quantity,
-        balanceAfter: quantityOnHand,
-        receiptId: receipt.id,
-        receivingDocumentId: documentId,
-        createdById: user.id,
-        createdAt: now,
-      },
+    await moveStock(tx, {
+      type: 'RECEIPT',
+      receiptId: receipt.id,
+      productId: item.productId,
+      quantityChange: quantity,
+      receivingDocumentId: documentId,
+      createdById: user.id,
+      createdAt: now,
     });
     if (status === 'OPEN') {
       await tx.receivingDocument.update({ where: { id: documentId }, data: { status: 'IN_PROGRESS', updatedAt: now } });

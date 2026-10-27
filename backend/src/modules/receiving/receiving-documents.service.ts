@@ -138,6 +138,18 @@ export async function lockDocument(tx: Tx, id: string): Promise<{ status: Receiv
   return doc;
 }
 
+// FR-23: the document with its lines and all receipts (each with its reversal), oldest first.
+export async function documentDetail(db: Tx, id: string): Promise<ReceivingDocumentDetail> {
+  const doc = await db.receivingDocument.findUnique({ where: { id }, include: DETAIL_INCLUDE });
+  if (!doc) throw new AppError(ErrorCode.NOT_FOUND, 'Receiving document not found.');
+  const receipts = await db.receipt.findMany({
+    where: { receivingItem: { receivingDocumentId: id } },
+    include: RECEIPT_INCLUDE,
+    orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
+  });
+  return toDetail(doc, receipts);
+}
+
 async function incompleteItems(tx: Tx, documentId: string) {
   const items = await tx.receivingItem.findMany({
     where: { receivingDocumentId: documentId },
@@ -180,7 +192,7 @@ export class ReceivingDocumentsService {
   // One snapshot for the document and its receipts, so a receipt committed in between cannot show up
   // in one read and not the other.
   get(id: string): Promise<ReceivingDocumentDetail> {
-    return this.prisma.$transaction((tx) => this.detail(tx, id), {
+    return this.prisma.$transaction((tx) => documentDetail(tx, id), {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
     });
   }
@@ -205,7 +217,7 @@ export class ReceivingDocumentsService {
           items: { create: items },
         },
       });
-      return this.detail(tx, id);
+      return documentDetail(tx, id);
     }, TX_OPTIONS);
   }
 
@@ -280,24 +292,13 @@ export class ReceivingDocumentsService {
     }));
   }
 
-  private async detail(db: Tx, id: string): Promise<ReceivingDocumentDetail> {
-    const doc = await db.receivingDocument.findUnique({ where: { id }, include: DETAIL_INCLUDE });
-    if (!doc) throw new AppError(ErrorCode.NOT_FOUND, 'Receiving document not found.');
-    const receipts = await db.receipt.findMany({
-      where: { receivingItem: { receivingDocumentId: id } },
-      include: RECEIPT_INCLUDE,
-      orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
-    });
-    return toDetail(doc, receipts);
-  }
-
   // BR-10: lines change only while the document is DRAFT, under the document lock.
   private editItems(documentId: string, write: (tx: Tx, now: Date) => Promise<void>): Promise<ReceivingDocumentDetail> {
     return this.prisma.$transaction(async (tx) => {
       const { status, now } = await lockDocument(tx, documentId);
       assertCan('EDIT_ITEMS', status);
       await write(tx, now);
-      return this.detail(tx, documentId);
+      return documentDetail(tx, documentId);
     }, TX_OPTIONS);
   }
 
@@ -311,7 +312,7 @@ export class ReceivingDocumentsService {
       const { status, now } = await lockDocument(tx, id);
       assertCan(action, status);
       await tx.receivingDocument.update({ where: { id }, data: { ...(await guard(tx, now)), updatedAt: now } });
-      return this.detail(tx, id);
+      return documentDetail(tx, id);
     }, TX_OPTIONS);
   }
 }

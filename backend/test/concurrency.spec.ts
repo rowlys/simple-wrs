@@ -4,7 +4,7 @@ import request from 'supertest';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp, createUsersAndLogin, TestUsers } from './app';
 import { assertInventoryConsistent, truncateAll } from './db';
-import { createProducts, openDocument, receive } from './fixtures';
+import { createProducts, openDocument, receive, reverse } from './fixtures';
 
 // Parallel HTTP requests against one listening server and the real wrs_test database (testing.md §4.4).
 // The races are not forced into an order, so each test asserts what must hold for every interleaving.
@@ -134,6 +134,37 @@ describe('concurrency (BR-14)', () => {
         expect(complete.body.error.code).toBe('ITEMS_NOT_FULLY_RECEIVED');
         expect(after.status).toBe('IN_PROGRESS');
       }
+    }
+  });
+
+  it('T-CON-05 AC-08.4 BR-19 two parallel reversals of the same receipt: exactly one 200, one 409 RECEIPT_ALREADY_REVERSED', async () => {
+    for (let round = 0; round < ROUNDS; round++) {
+      const doc = await open(100);
+      const target = (await op(doc, 40)).body.receipt;
+      await op(doc, 30); // keeps the document IN_PROGRESS after the reversal, so the loser meets the reversed receipt
+
+      const results = await Promise.all([1, 2].map(() => reverse(app, users.supervisor.token, doc.id, target.id)));
+
+      expect(statuses(results)).toEqual([200, 409]);
+      expect(results.find((r) => r.status === 409)!.body.error.code).toBe('RECEIPT_ALREADY_REVERSED');
+      expect(await prisma.receiptReversal.count({ where: { receiptId: target.id } })).toBe(1);
+      expect(await prisma.inventoryTransaction.count({ where: { receivingDocumentId: doc.id, type: 'RECEIPT_REVERSAL' } })).toBe(1);
+      expect((await stored(doc.id)).items[0].receivedQuantity).toBe(30);
+    }
+  });
+
+  it('T-CON-06 BR-13 BR-14 a reversal and a new receipt on the same line in parallel both apply exactly once', async () => {
+    for (let round = 0; round < ROUNDS; round++) {
+      const doc = await open(100);
+      const forty = (await op(doc, 40)).body.receipt;
+      await op(doc, 30);
+      const before = await onHand();
+
+      const [reversal, receipt] = await Promise.all([reverse(app, users.supervisor.token, doc.id, forty.id), op(doc, 30)]);
+
+      expect([reversal.status, receipt.status]).toEqual([200, 201]);
+      expect((await stored(doc.id)).items[0].receivedQuantity).toBe(60);
+      expect(await onHand()).toBe(before - 40 + 30);
     }
   });
 });

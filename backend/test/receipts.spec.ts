@@ -3,7 +3,7 @@ import request from 'supertest';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { createTestApp, createUsersAndLogin, TestUsers } from './app';
 import { assertInventoryConsistent, truncateAll } from './db';
-import { createProducts, openDocument, receive } from './fixtures';
+import { createProducts, openDocument, receive, reverse } from './fixtures';
 
 describe('receipts (US-04)', () => {
   let app: INestApplication;
@@ -36,6 +36,7 @@ describe('receipts (US-04)', () => {
     items: await prisma.receivingItem.findMany({ orderBy: { id: 'asc' } }),
     documents: await prisma.receivingDocument.findMany({ orderBy: { id: 'asc' } }),
     receipts: await prisma.receipt.findMany({ orderBy: { id: 'asc' } }),
+    reversals: await prisma.receiptReversal.findMany({ orderBy: { id: 'asc' } }),
     balances: await prisma.inventoryBalance.findMany({ orderBy: { productId: 'asc' } }),
     ledger: await prisma.inventoryTransaction.findMany({ orderBy: { id: 'asc' } }),
   });
@@ -267,6 +268,156 @@ describe('receipts (US-04)', () => {
         expect(res.body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
       }
       expect(await snapshot()).toEqual(before);
+    });
+  });
+
+  describe('reversal (FR-36, FR-37)', () => {
+    const sup = (documentId: string, receiptId: string, body?: object) => reverse(app, users.supervisor.token, documentId, receiptId, body);
+    const statusOf = async (id: string) => (await prisma.receivingDocument.findUniqueOrThrow({ where: { id } })).status;
+    // An IN_PROGRESS document with one line per expected quantity and one receipt per entry of `received` (on line 0).
+    const withReceipts = async (expected: number[], received: number[]) => {
+      const doc = await open(...expected);
+      const receipts = [];
+      for (const quantity of received) receipts.push((await op(doc.id, doc.items[0].id, quantity)).body.receipt);
+      return { doc, receipts };
+    };
+
+    it('T-REV-01 AC-08.1 FR-37 reversing the only receipt: kept with its reversal, stock back to 0, document OPEN', async () => {
+      const { doc, receipts: [r] } = await withReceipts([100], [100]);
+      const receiptRow = await prisma.receipt.findUniqueOrThrow({ where: { id: r.id } });
+      const receiptTx = await prisma.inventoryTransaction.findUniqueOrThrow({ where: { receiptId: r.id } });
+      const opened = await prisma.receivingDocument.findUniqueOrThrow({ where: { id: doc.id } });
+
+      const res = await sup(doc.id, r.id, { reason: '  Typo, counted 10  ' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        id: doc.id,
+        status: 'OPEN',
+        openedAt: opened.openedAt!.toISOString(),
+        openedBy: { id: users.supervisor.id, fullName: 'supervisor' },
+        totalReceivedQuantity: 0,
+      });
+      expect(res.body.items[0]).toMatchObject({ receivedQuantity: 0, remainingQuantity: 100, isFullyReceived: false });
+      const reversal = { id: expect.any(String), reason: 'Typo, counted 10', reversedAt: expect.any(String), reversedBy: { id: users.supervisor.id, fullName: 'supervisor' } };
+      expect(res.body.receipts).toEqual([{ ...r, reversal }]);
+      expect(await onHand(products[0].id)).toBe(0);
+      expect(await prisma.inventoryTransaction.findMany({ orderBy: { id: 'asc' } })).toEqual([
+        receiptTx,
+        expect.objectContaining({
+          type: 'RECEIPT_REVERSAL',
+          quantityChange: -100,
+          balanceAfter: 0,
+          receiptId: null,
+          receiptReversalId: res.body.receipts[0].reversal.id,
+          receivingDocumentId: doc.id,
+          createdById: users.supervisor.id,
+        }),
+      ]);
+      expect(await prisma.receipt.findUniqueOrThrow({ where: { id: r.id } })).toEqual(receiptRow);
+    });
+
+    it('T-REV-02 AC-08.2 receiving 10 after the full reversal: IN_PROGRESS, ledger +100, −100, +10', async () => {
+      const { doc, receipts: [r] } = await withReceipts([100], [100]);
+      await sup(doc.id, r.id);
+
+      const res = await op(doc.id, doc.items[0].id, 10);
+
+      expect(res.status).toBe(201);
+      expect(res.body.item.receivedQuantity).toBe(10);
+      expect(await statusOf(doc.id)).toBe('IN_PROGRESS');
+      expect(await onHand(products[0].id)).toBe(10);
+      const ledger = await prisma.inventoryTransaction.findMany({ where: { productId: products[0].id }, orderBy: { id: 'asc' } });
+      expect(ledger.map((t) => [t.quantityChange, t.balanceAfter])).toEqual([[100, 100], [-100, 0], [10, 10]]);
+    });
+
+    it('T-REV-03 AC-08.3 receipts 40 and 60, reversing the 60: received 40, on-hand −60, still IN_PROGRESS', async () => {
+      const { doc, receipts: [, sixty] } = await withReceipts([100], [40, 60]);
+
+      const res = await sup(doc.id, sixty.id);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('IN_PROGRESS');
+      expect(res.body.items[0]).toMatchObject({ receivedQuantity: 40, remainingQuantity: 60 });
+      expect(await onHand(products[0].id)).toBe(40);
+    });
+
+    it('T-REV-04 AC-08.4 BR-19 reversing the same receipt again is 409 RECEIPT_ALREADY_REVERSED and nothing changes', async () => {
+      const { doc, receipts: [, sixty] } = await withReceipts([100], [40, 60]);
+      await sup(doc.id, sixty.id);
+      const before = await snapshot();
+
+      const res = await sup(doc.id, sixty.id);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('RECEIPT_ALREADY_REVERSED');
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it.each(['OPEN', 'COMPLETED', 'CLOSED_SHORT'] as const)(
+      'T-REV-05 AC-08.5 BR-18 reversing a receipt of a %s document is 409 INVALID_DOCUMENT_STATUS and nothing changes',
+      async (status) => {
+        const { doc, receipts: [r] } = await withReceipts([10], status === 'CLOSED_SHORT' ? [4] : [10]);
+        if (status === 'OPEN') await sup(doc.id, r.id); // the full reversal moves it back to OPEN (A-15)
+        if (status === 'COMPLETED') await action(doc.id, 'complete');
+        if (status === 'CLOSED_SHORT') await action(doc.id, 'close-short', { reason: 'Supplier out of stock' });
+        expect(await statusOf(doc.id)).toBe(status);
+        const before = await snapshot();
+
+        const res = await sup(doc.id, r.id);
+
+        expect(res.status).toBe(409);
+        expect(res.body.error.code).toBe('INVALID_DOCUMENT_STATUS');
+        expect(await snapshot()).toEqual(before);
+      },
+    );
+
+    it('T-REV-06 AC-08.6 BR-18 a receipt of another document, unknown and non-UUID ids are 404 / 400; nothing changes', async () => {
+      const { doc, receipts: [r] } = await withReceipts([100], [10]);
+      const { receipts: [foreign] } = await withReceipts([100], [10]);
+      const before = await snapshot();
+
+      expect((await sup(doc.id, foreign.id)).status).toBe(404);
+      expect((await sup(doc.id, '00000000-0000-4000-8000-000000000000')).status).toBe(404);
+      expect((await sup('00000000-0000-4000-8000-000000000000', r.id)).status).toBe(404);
+      expect((await sup(doc.id, 'not-a-uuid')).status).toBe(400);
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it.each([[{}], [{ reason: '' }], [{ reason: '   ' }], [{ reason: ' ab ' }], [{ reason: 'r'.repeat(501) }], [{ reason: 5 }]])(
+      'T-REV-06 AC-08.6 BR-17 reversing with %p is 400 VALIDATION_ERROR naming reason and nothing changes',
+      async (body) => {
+        const { doc, receipts: [r] } = await withReceipts([100], [10]);
+        const before = await snapshot();
+
+        const res = await sup(doc.id, r.id, body);
+
+        expect(res.status).toBe(400);
+        expect(fieldsOf(res)).toEqual(expect.arrayContaining(['reason']));
+        expect(await snapshot()).toEqual(before);
+      },
+    );
+
+    it('T-REV-06 AC-08.6 an operator gets 403 FORBIDDEN and nothing changes', async () => {
+      const { doc, receipts: [r] } = await withReceipts([100], [10]);
+      const before = await snapshot();
+
+      const res = await reverse(app, users.operator.token, doc.id, r.id);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('FORBIDDEN');
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it('T-REV-07 AC-05.4 A-15 a document back in OPEN after a full reversal can be cancelled; on-hand nets to 0', async () => {
+      const { doc, receipts: [r] } = await withReceipts([100], [100]);
+      await sup(doc.id, r.id);
+
+      const res = await action(doc.id, 'cancel', { reason: 'Supplier cancelled shipment' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('CANCELLED');
+      expect(await onHand(products[0].id)).toBe(0);
     });
   });
 });

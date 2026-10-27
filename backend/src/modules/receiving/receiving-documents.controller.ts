@@ -117,6 +117,19 @@ export class ReceivingDocumentsController {
     return result;
   }
 
+  // FR-36, spec §6.2
+  @Post(':documentId/receipts/:receiptId/reverse')
+  @Roles('SUPERVISOR')
+  @HttpCode(200)
+  reverseReceipt(
+    @DocumentId() documentId: string,
+    @Param('receiptId', ParseUUIDPipe) receiptId: string,
+    @Body() body: ReasonRequest,
+    @CurrentUser() user: AuthUser,
+  ): Promise<ReceivingDocumentDetail> {
+    return this.receipts.reverseReceipt(documentId, receiptId, body.reason, user);
+  }
+
   @Post(':documentId/cancel')
   @Roles('SUPERVISOR')
   @HttpCode(200)
