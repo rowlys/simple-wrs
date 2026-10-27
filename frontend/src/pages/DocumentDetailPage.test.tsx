@@ -56,7 +56,7 @@ describe('DocumentDetailPage', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('FR-24 FR-25 FR-26 a supervisor changes and removes lines of a DRAFT document; an operator sees no line controls', async () => {
+  it('FR-24 FR-25 FR-26 a supervisor on a DRAFT document changes and removes a line and gets the add-line form', async () => {
     const doc = makeDocument('DRAFT');
     const fetchMock = show(doc, supervisor, (route) => (route.startsWith('DELETE') ? { status: 204 } : undefined));
 
