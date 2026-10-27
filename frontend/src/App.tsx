@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/LoginPage';
+import { ProductsPage } from './pages/ProductsPage';
 
 // Spec §1.3 routes; the default after login is /receiving.
 export function App() {
@@ -11,6 +12,7 @@ export function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
           <Route path="/receiving" element={<p>Receiving documents</p>} />
+          <Route path="/products" element={<ProductsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/receiving" replace />} />

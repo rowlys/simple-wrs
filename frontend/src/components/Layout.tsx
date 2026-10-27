@@ -3,7 +3,10 @@ import { useDisclosure } from '@mantine/hooks';
 import { NavLink as RouterNavLink, Outlet } from 'react-router';
 import { useAuth, useCurrentUser } from '../auth/AuthProvider';
 
-const LINKS: { to: string; label: string; end?: boolean }[] = [{ to: '/receiving', label: 'Receiving' }];
+const LINKS: { to: string; label: string; end?: boolean }[] = [
+  { to: '/receiving', label: 'Receiving' },
+  { to: '/products', label: 'Products' },
+];
 
 export function Layout() {
   const user = useCurrentUser();
