@@ -21,7 +21,7 @@ export function renderApp(ui: ReactElement, { route = '/', session }: { route?: 
   if (session) writeSession(session);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
-    <MantineProvider>
+    <MantineProvider env="test">
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={[route]}>
           <AuthProvider>{ui}</AuthProvider>

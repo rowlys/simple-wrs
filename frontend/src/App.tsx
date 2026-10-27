@@ -1,6 +1,9 @@
 import { Navigate, Route, Routes } from 'react-router';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { Layout } from './components/Layout';
+import { DocumentCreatePage } from './pages/DocumentCreatePage';
+import { DocumentDetailPage } from './pages/DocumentDetailPage';
+import { DocumentsPage } from './pages/DocumentsPage';
 import { LoginPage } from './pages/LoginPage';
 import { ProductsPage } from './pages/ProductsPage';
 
@@ -11,7 +14,9 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
-          <Route path="/receiving" element={<p>Receiving documents</p>} />
+          <Route path="/receiving" element={<DocumentsPage />} />
+          <Route path="/receiving/new" element={<DocumentCreatePage />} />
+          <Route path="/receiving/:id" element={<DocumentDetailPage />} />
           <Route path="/products" element={<ProductsPage />} />
         </Route>
       </Route>
