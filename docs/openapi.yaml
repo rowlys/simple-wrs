@@ -11,6 +11,8 @@ info:
     * Every error response uses the `ErrorResponse` envelope.
     * All timestamps are ISO 8601 in UTC.
 servers:
+  - url: /api/v1
+    description: The server this document is served from (Swagger UI at /api/docs)
   - url: http://localhost:8080/api/v1
     description: Docker Compose stack (through nginx)
   - url: http://localhost:3000/api/v1
@@ -564,6 +566,7 @@ paths:
 
   /health:
     servers:
+      - url: /
       - url: http://localhost:8080
       - url: http://localhost:3000
     get:
