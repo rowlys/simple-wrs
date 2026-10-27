@@ -131,6 +131,16 @@ $ cd frontend && npm test
 (pending)
 ```
 
+2026-10-28, instruction #8, frontend unit tests (Vitest + Testing Library, `fetch` stubbed; the backend is covered by the integration suite above):
+
+```
+$ cd frontend && npm test
+ Test Files  12 passed (12)
+      Tests  48 passed (48)
+```
+
+Names include T-FE-01 (`can()` against the spec §8 matrix), T-FE-02 (three tests: the same key after a network error, a new key for a new quantity, the same key when the same quantity is typed again) and T-FE-03 (`canOnDocument` for every action × role × status, the buttons per status for each role, and the receive and line controls on the detail page).
+
 ### 4.2 Inventory stays correct after receiving (T-RCV-01, T-RCV-02, T-INV-01–03, T-REV-01–03)
 Each test also runs `assertInventoryConsistent()` afterwards: for every product, on-hand equals the sum of its ledger rows (BR-12), and every line's received quantity equals the sum of its non-reversed receipts (BR-13).
 
@@ -204,6 +214,25 @@ Fresh stack (new named volume), configuration taken unchanged from `.env.example
 
 ```
 (pending)
+```
+
+Partial check, 2026-10-28, instruction #8, on the **existing** stack and volume (a fresh volume would have deleted the demo data). Not shown yet: a first start from `.env.example`, which needs its `change-me` values replaced (the `JWT_SECRET` placeholder is deliberately too short, §7 #1).
+
+```
+$ docker compose up --build -d && docker compose ps
+api Up 44 seconds (healthy)
+db  Up 6 hours (healthy)
+web Up 33 seconds (healthy)   0.0.0.0:8080->80/tcp
+$ curl -s -w ' %{http_code}' http://localhost:8080/health
+{"status":"ok","database":"up"} 200
+$ curl -s -o /dev/null -w '%{http_code} %{content_type}' http://localhost:8080/receiving/abc     # SPA fallback
+200 text/html
+$ curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/api/v1/auth/login …      # seeded supervisor
+200
+$ curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/docs/
+200
+$ docker compose up -d --force-recreate api; curl -s -w ' %{http_code}' http://localhost:8080/health
+{"status":"ok","database":"up"} 200
 ```
 
 ### 4.6 End-to-end run (T-E2E-01, T-E2E-02)
