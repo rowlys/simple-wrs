@@ -72,7 +72,8 @@ One row per instruction, oldest first.
 | # | Date | Instruction | Requirement IDs | Commits | Result |
 |---|---|---|---|---|---|
 | 1 | 2026-10-27 | Let the agent commit finished changes without asking | — | a1ecda2 | done |
-| 2 | 2026-10-27 | Create the app foundations: database schema, backend skeleton, seed, test setup, auth and guards | NFR-01, NFR-02, NFR-05, NFR-09, FR-01–FR-03, FR-12, FR-50, A-08, AC-01.1–AC-01.4, AC-09.1–AC-09.2; T-DB-01–03, T-AUT-01–03, T-API-02, T-HLT-01 | 37002dc, 1e577f0, docs commit | partial: T-AUT-04 waits for the supervisor-only endpoints (FR-03 / AC-01.4 covered through a test-only controller); no Dockerfiles, Swagger UI or frontend yet |
+| 2 | 2026-10-27 | Create the app foundations: database schema, backend skeleton, seed, test setup, auth and guards | NFR-01, NFR-02, NFR-05, NFR-09, FR-01–FR-03, FR-12, FR-50, A-08, AC-01.1–AC-01.4, AC-09.1–AC-09.2; T-DB-01–03, T-AUT-01–03, T-API-02, T-HLT-01 | 37002dc, 1e577f0, 0d43b78 | partial: T-AUT-04 waits for the supervisor-only endpoints (FR-03 / AC-01.4 covered through a test-only controller); no Dockerfiles, Swagger UI or frontend yet |
+| 3 | 2026-10-27 | Create the product model and its endpoints | FR-10–FR-13, BR-01–BR-03, AC-02.1–AC-02.4, AC-02.5 (API part), FR-03; T-PRD-01–04, T-AUT-04 (POST /products) | 36d1c14, 265a79e, docs commit | done (frontend part of AC-02.5 comes with the frontend) |
 
 Result is one of: done, partial (say what is left), rejected (say why).
 
@@ -93,6 +94,10 @@ Details the PRD and technical spec leave open, resolved with the simplest option
 | D-09 | 2026-10-27 | 2 | `GET /auth/me` reads the user from the database; a valid token for a user that no longer exists gets 401 `UNAUTHENTICATED`. | `User.fullName` is not in the token. | `src/modules/auth/` |
 | D-10 | 2026-10-27 | 2 | `main.ts` exports `configureApp()` (global prefix + request logger), used by bootstrap and by the integration tests; guards, the validation pipe and the filter are `APP_*` providers in `AppModule`. `nest build` compiles `src/` only, so the entry point is `dist/main.js` (spec §11). | Tests run exactly the app that ships, with no copy of the setup. | `src/main.ts`, `src/app.module.ts`, `tsconfig.build.json` |
 | D-11 | 2026-10-27 | 2 | The Jest global setup runs `prisma migrate deploy` (after the `_test` guard) instead of `prisma migrate reset --force --skip-seed`; each test file still truncates the tables in `beforeEach`. User decision. | Prisma 6.19 refuses `migrate reset` when run by an AI agent without the user's consent, so the agent could not run the suite. | spec §3.3 step 7, `test/global-setup.ts` |
+| D-12 | 2026-10-27 | 3 | Product `description` is trimmed; an empty or whitespace-only value (or `null`) is stored as `null`. The 1000-character limit applies after trimming, like name and unit (BR-03). | BR-03 makes description optional and the column nullable; a blank string carries no information, and one empty state is simpler for the UI. | `src/modules/products/dto/product.dto.ts` |
+| D-13 | 2026-10-27 | 3 | Product list order is `created_at DESC, id DESC`. | FR-10 says newest first; rows created in one transaction share `now()`, and without a unique tie-break they could repeat or vanish across pages. | `src/modules/products/products.service.ts` |
+| D-14 | 2026-10-27 | 3 | Product search escapes `\`, `%` and `_` before Prisma's `contains` (`mode: 'insensitive'`, i.e. `ILIKE`), so they match literally. An empty or whitespace-only `search` means no filter. | Observed: Prisma 6.19 passes `contains` to `ILIKE` unescaped, so search `%` or `_` listed every product and `\` listed none (test T-PRD-04). | `src/modules/products/products.service.ts`; later list searches (documents) need the same escape |
+| D-15 | 2026-10-27 | 3 | `page` has an upper bound of 1,000,000 on every list (spec §4.4 only says ≥ 1); a larger page is 400 `VALIDATION_ERROR` naming `page`. | Without a bound, e.g. `page=1e18` passes `@IsInt` and Prisma 6.19 rejects the 64-bit `skip` with a 500. 1,000,000 × 100 rows is far beyond NFR-04. | `src/common/pagination/pagination.ts` |
 
 ## 7. Where the AI was wrong
 
@@ -102,6 +107,9 @@ Mistakes the agent made, how they were caught, and how they were fixed.
 |---|---|---|---|---|
 | 1 | 2026-10-27 | `.env.example` shipped a 42-character `JWT_SECRET` placeholder, which passes the ≥ 32 check: an unedited copy would start the API with a public secret, so anyone could sign a SUPERVISOR token. | `/code-review` (instruction #2) | Placeholder shortened below 32 characters; test `NFR-02 the JWT_SECRET placeholder in .env.example is rejected…` fails if it is lengthened again |
 | 2 | 2026-10-27 | `engines` allowed Node 22.0–22.17, where `npm run seed` (`node prisma/seed.ts`) fails because type stripping is on by default only from 22.18. | `/code-review` (instruction #2) | `engines.node` set to `>=22.18 <23` |
+| 3 | 2026-10-27 | `page` had no upper bound: `?page=1e18` passed validation and Prisma rejected the 64-bit `skip`, so a client mistake returned 500 `INTERNAL_ERROR`. | `/code-review` (instruction #3); confirmed against `wrs_test` | `@Max(1_000_000)` on `page` (D-15), with tests |
+| 4 | 2026-10-27 | SKU normalization used full Unicode `toUpperCase()`, so `ßku-1` was stored as `SSKU-1`, `ſku-1` as `SKU-1` and `ıabc` as `IABC`: SKUs the user never typed. | `/code-review` (instruction #3) | Only ASCII `a–z` are upper-cased; non-ASCII input now fails BR-01 with 400, with tests |
+| 5 | 2026-10-27 | Eight test names started with "spec §…" instead of a requirement ID (CLAUDE.md rule); four of them slipped through the review of instruction #2. | `/code-review` (instruction #3) | Renamed; test names are now checked for a leading ID in every review |
 
 ## 8. Evidence
 
