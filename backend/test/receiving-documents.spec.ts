@@ -3,7 +3,8 @@ import { ReceivingStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { createTestApp, createUsersAndLogin, TestUsers } from './app';
-import { truncateAll } from './db';
+import { assertInventoryConsistent, truncateAll } from './db';
+import { receive } from './fixtures';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('receiving documents (US-03, US-05, US-07)', () => {
@@ -24,6 +25,7 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
       products.push({ id, sku, name, unitOfMeasure });
     }
   });
+  afterEach(() => assertInventoryConsistent(prisma));
   afterAll(() => app.close());
 
   const api = (method: 'get' | 'post' | 'patch' | 'delete', path = '', as: keyof TestUsers = 'supervisor') =>
@@ -41,24 +43,26 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
   // A DRAFT document with one line per expected quantity (products in SKU order).
   const draft = async (...expected: number[]) => (await create({ supplierName: 'PT Sumber Beku', items: lines(...expected) })).body;
 
-  // shortcut: writes status and received quantities straight to the database (no receipts, no ledger rows)
-  // because ReceiptsService does not exist yet; switch to POST …/receipts once it does.
+  // Drives a document to `status` through the API: open, receive each line up to `received` (lines in SKU order),
+  // then complete / close short / cancel. COMPLETED receives everything; IN_PROGRESS and CLOSED_SHORT receive 1
+  // on the first line when `received` is empty. Fails loudly if the state cannot be reached.
   const setState = async (documentId: string, status: ReceivingStatus, received: number[] = []) => {
-    const items = await prisma.receivingItem.findMany({ where: { receivingDocumentId: documentId }, orderBy: { product: { sku: 'asc' } } });
-    for (const [i, receivedQuantity] of received.entries()) {
-      await prisma.receivingItem.update({ where: { id: items[i].id }, data: { receivedQuantity } });
+    if (status === 'DRAFT') return;
+    const doc = (await api('get', `/${documentId}`)).body;
+    if (doc.status === 'DRAFT') expect((await action(documentId, 'open')).status).toBe(200);
+
+    let targets = received;
+    if (status === 'COMPLETED') targets = doc.items.map((i: { expectedQuantity: number }) => i.expectedQuantity);
+    else if (!received.length && (status === 'IN_PROGRESS' || status === 'CLOSED_SHORT')) targets = [1];
+    for (const [i, target] of targets.entries()) {
+      const missing = target - doc.items[i].receivedQuantity;
+      if (missing > 0) expect((await receive(app, users.operator.token, documentId, doc.items[i].id, missing)).status).toBe(201);
     }
-    const at = new Date();
-    await prisma.receivingDocument.update({
-      where: { id: documentId },
-      data: {
-        status,
-        ...(status !== 'DRAFT' && { openedAt: at, openedById: users.supervisor.id }),
-        ...(status === 'COMPLETED' && { completedAt: at, completedById: users.supervisor.id }),
-        ...(status === 'CLOSED_SHORT' && { closedShortAt: at, closedShortById: users.supervisor.id, closeShortReason: 'fixture' }),
-        ...(status === 'CANCELLED' && { cancelledAt: at, cancelledById: users.supervisor.id, cancelReason: 'fixture' }),
-      },
-    });
+
+    if (status === 'COMPLETED') await action(documentId, 'complete');
+    if (status === 'CLOSED_SHORT') await action(documentId, 'close-short', { reason: 'fixture' });
+    if (status === 'CANCELLED') await action(documentId, 'cancel', { reason: 'fixture' });
+    expect((await snapshot(documentId)).status).toBe(status);
   };
 
   // The document and its lines as stored, to prove a rejected request changed nothing.
@@ -227,39 +231,34 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
       expect(res.body).toEqual(created);
     });
 
-    it('FR-23 FR-34 lists receipts oldest first with SKU, user and reversal; per-line and document received flags', async () => {
+    // The reversal shown on a receipt is tested with the reverse endpoint (T-REV-01), which does not exist yet.
+    it('FR-23 FR-34 lists receipts oldest first with SKU and user; per-line and document received flags', async () => {
       const doc = await draft(10, 5);
-      await setState(doc.id, 'IN_PROGRESS', [10, 0]);
+      await setState(doc.id, 'IN_PROGRESS', [10, 3]);
       const [first, second] = doc.items.map((i: { id: string }) => i.id);
-      // shortcut: receipt rows written directly until ReceiptsService exists (same as setState).
-      const older = await prisma.receipt.create({
-        data: { receivingItemId: first, quantity: 10, idempotencyKey: 'key-older-1', receivedById: users.operator.id, receivedAt: new Date('2026-01-01T08:00:00Z') },
-      });
-      const newer = await prisma.receipt.create({
-        data: { receivingItemId: second, quantity: 3, idempotencyKey: 'key-newer-1', receivedById: users.operator.id, receivedAt: new Date('2026-01-01T09:00:00Z') },
-      });
-      await prisma.receiptReversal.create({ data: { receiptId: newer.id, reason: 'Typo', reversedById: users.supervisor.id } });
+      const older = await prisma.receipt.findFirstOrThrow({ where: { receivingItemId: first } });
+      const newer = await prisma.receipt.findFirstOrThrow({ where: { receivingItemId: second } });
 
       const res = await api('get', `/${doc.id}`, 'operator');
 
       expect(res.body.receipts).toEqual([
-        { id: older.id, receivingItemId: first, productSku: 'AAA-001', quantity: 10, receivedAt: '2026-01-01T08:00:00.000Z', receivedBy: { id: users.operator.id, fullName: 'operator' }, reversal: null },
+        { id: older.id, receivingItemId: first, productSku: 'AAA-001', quantity: 10, receivedAt: older.receivedAt.toISOString(), receivedBy: { id: users.operator.id, fullName: 'operator' }, reversal: null },
         {
           id: newer.id,
           receivingItemId: second,
           productSku: 'BBB-002',
           quantity: 3,
-          receivedAt: '2026-01-01T09:00:00.000Z',
+          receivedAt: newer.receivedAt.toISOString(),
           receivedBy: { id: users.operator.id, fullName: 'operator' },
-          reversal: { id: uuid, reason: 'Typo', reversedAt: isoDate, reversedBy: { id: users.supervisor.id, fullName: 'supervisor' } },
+          reversal: null,
         },
       ]);
       expect(res.body.items.map((i: { isFullyReceived: boolean; remainingQuantity: number }) => [i.isFullyReceived, i.remainingQuantity])).toEqual([
         [true, 0],
-        [false, 5],
+        [false, 2],
       ]);
       expect(res.body.allItemsReceived).toBe(false);
-      expect(res.body.totalReceivedQuantity).toBe(10);
+      expect(res.body.totalReceivedQuantity).toBe(13);
 
       await setState(doc.id, 'IN_PROGRESS', [10, 5]);
       expect((await api('get', `/${doc.id}`)).body.allItemsReceived).toBe(true);
@@ -305,7 +304,7 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
     it('T-DOC-14 FR-20 filters by status and searches number, supplier and reference in any case, literally', async () => {
       const a = (await create({ supplierName: 'PT Sumber Beku', referenceNumber: 'SJ-2026-10-0042' })).body;
       const b = (await create({ supplierName: '100% Fresh Farms' })).body;
-      const c = (await create({ supplierName: 'Ocean Catch' })).body;
+      const c = (await create({ supplierName: 'Ocean Catch', items: lines(1) })).body;
       await setState(c.id, 'OPEN');
 
       const ids = async (query: Record<string, string>) =>
@@ -495,6 +494,8 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
         completedAt: isoDate,
         completedBy: { id: users.supervisor.id, fullName: 'supervisor' },
       });
+      const again = await receive(app, users.operator.token, doc.id, doc.items[0].id, 1);
+      expect({ status: again.status, code: again.body.error.code }).toEqual({ status: 409, code: 'INVALID_DOCUMENT_STATUS' });
     });
 
     it('T-DOC-10 AC-05.2 BR-11 a line outstanding is 422 ITEMS_NOT_FULLY_RECEIVED listing it; status unchanged', async () => {
@@ -517,7 +518,7 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
       'T-DOC-11 AC-05.3 BR-11 completing a %s document is 409 INVALID_STATUS_TRANSITION',
       async (status) => {
         const doc = await draft(100);
-        await setState(doc.id, status, status === 'DRAFT' ? [] : [100]);
+        await setState(doc.id, status);
 
         const res = await action(doc.id, 'complete');
 
@@ -547,7 +548,7 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
       'T-DOC-12 AC-05.5 BR-15 cancelling a %s document is 409 INVALID_STATUS_TRANSITION; nothing changes',
       async (status) => {
         const doc = await draft(100);
-        await setState(doc.id, status, [40]);
+        await setState(doc.id, status, status === 'CANCELLED' ? [] : [40]);
         const before = await snapshot(doc.id);
 
         const res = await action(doc.id, 'cancel', { reason: 'Too late' });
@@ -586,6 +587,8 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
     it('T-CLS-01 AC-07.1 FR-35 closes short with 70 of 100 received; shortage kept, stock untouched', async () => {
       const doc = await draft(100);
       await setState(doc.id, 'IN_PROGRESS', [70]);
+      const stock = async () => ({ balances: await prisma.inventoryBalance.findMany(), ledger: await prisma.inventoryTransaction.findMany() });
+      const stockBefore = await stock();
 
       const res = await action(doc.id, 'close-short', { reason: ' Supplier out of stock ' });
 
@@ -598,8 +601,9 @@ describe('receiving documents (US-03, US-05, US-07)', () => {
         allItemsReceived: false,
       });
       expect(res.body.items[0]).toMatchObject({ expectedQuantity: 100, receivedQuantity: 70, remainingQuantity: 30 });
-      expect((await prisma.inventoryBalance.findUniqueOrThrow({ where: { productId: products[0].id } })).quantityOnHand).toBe(0);
-      expect(await prisma.inventoryTransaction.count()).toBe(0);
+      expect(await stock()).toEqual(stockBefore);
+      const again = await receive(app, users.operator.token, doc.id, doc.items[0].id, 1);
+      expect({ status: again.status, code: again.body.error.code }).toEqual({ status: 409, code: 'INVALID_DOCUMENT_STATUS' });
     });
 
     it('T-CLS-02 AC-07.2 BR-11 closing short when every line is fully received is 422 NOTHING_SHORT', async () => {
