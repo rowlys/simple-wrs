@@ -20,11 +20,13 @@ If two disagree, stop and say so. Never invent behaviour.
 - No secrets in code; config comes from env (spec §10).
 - Undecided detail → simplest option that satisfies the PRD, logged in
   docs/ai-workflow.md "Decisions made during implementation".
-- Conventional Commits, one logical change per commit. Commit only when asked.
+- Conventional Commits, one logical change per commit. Commit a finished
+  change without asking: /code-review run, its findings fixed, full backend
+  suite passing (docs/ai-workflow.md §3). Never push unless asked.
 
 ## Skills
 - ponytail: active for all coding work.
-- /code-review before handing a change to the user: `medium` by default,
+- /code-review before every commit: `medium` by default,
   `high` for receipt, reversal and status-transition transactions.
 - /security-review after any change to auth, guards, tokens, passwords or config.
 

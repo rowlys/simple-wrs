@@ -28,7 +28,7 @@
 | Skill | When |
 |---|---|
 | `ponytail` | Active for all coding work. Smallest change that fully solves the request, matching the technical spec's rule to choose the simplest option that satisfies the PRD. |
-| `/code-review` | Before every change is handed to the user for review. Effort `medium` by default, `high` for receipt, reversal and status-transition transactions. |
+| `/code-review` | Before every commit (§3 step 6). Effort `medium` by default, `high` for receipt, reversal and status-transition transactions. |
 | `/security-review` | After any change to authentication, guards, tokens, password handling or configuration, and once before the final review. |
 
 ## 2. Sources of truth
@@ -47,11 +47,13 @@ An instruction chooses the next piece of work; it does not override the PRD. If 
 | 1 | Agent | Restate the instruction and list the requirement IDs it covers (FR, BR, AC, and test IDs from [testing.md](testing.md)). |
 | 2 | Agent | Plan: files to touch and tests to write. The user confirms when the change is large or ambiguous. |
 | 3 | Agent | Write the tests and show them failing. |
-| 4 | Agent | Implement. |
+| 4 | Agent | Implement. Record undecided details in §6. |
 | 5 | Agent | Run the affected tests and the full backend suite, including `assertInventoryConsistent()`. |
-| 6 | Agent | Run `/code-review` (and `/security-review` when §1.3 applies); fix what it finds. |
-| 7 | User | Review the change. |
-| 8 | Agent | Commit when asked: one logical change per commit, Conventional Commits. Add a row to the work log (§5). |
+| 6 | Agent | Run `/code-review` (and `/security-review` when §1.3 applies); fix what it finds and rerun the tests. Record significant findings in §7. |
+| 7 | Agent | Commit: one logical change per commit, Conventional Commits. Add a row to the work log (§5). |
+| 8 | User | Review the change. Fixes the user asks for are made as new commits. |
+
+**Commits.** The agent commits without asking the user once a change is finished: `/code-review` run, its findings fixed, and the full backend suite passing. A commit never contains tests that fail. Committed history is never amended or rewritten; later fixes are new commits. Nothing is pushed unless the user asks.
 
 ## 4. Rules for the agent
 
@@ -69,7 +71,7 @@ One row per instruction, oldest first.
 
 | # | Date | Instruction | Requirement IDs | Commits | Result |
 |---|---|---|---|---|---|
-| | | | | | |
+| 1 | 2026-10-27 | Let the agent commit finished changes without asking | — | not committed | done |
 
 Result is one of: done, partial (say what is left), rejected (say why).
 
