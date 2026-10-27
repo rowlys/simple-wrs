@@ -147,15 +147,50 @@ Each test also runs `assertInventoryConsistent()` afterwards: for every product,
 All requests over HTTP against one listening server, real `wrs_test` database. `assertInventoryConsistent()` runs after every test.
 
 ```
-$ cd backend && for i in $(seq 10); do echo "--- run $i"; npm test -- concurrency || exit 1; done
-(pending)
+$ cd backend && for i in $(seq 10); do echo "--- run $i"; npm test -- concurrency 2>&1 | grep -E "Tests:" || exit 1; done
+--- run 1
+Tests:       6 passed, 6 total
+--- run 2
+Tests:       6 passed, 6 total
+--- run 3
+Tests:       6 passed, 6 total
+--- run 4
+Tests:       6 passed, 6 total
+--- run 5
+Tests:       6 passed, 6 total
+--- run 6
+Tests:       6 passed, 6 total
+--- run 7
+Tests:       6 passed, 6 total
+--- run 8
+Tests:       6 passed, 6 total
+--- run 9
+Tests:       6 passed, 6 total
+--- run 10
+Tests:       6 passed, 6 total
 ```
+
+2026-10-27, instruction #5: T-IDM-03 (two variants), T-CON-01–04. T-CON-05/06 need the reverse endpoint.
 
 Control check: remove `FOR UPDATE` from the document and line locks and confirm the concurrency tests fail, so they catch missing locks rather than passing by luck.
 
 ```
-(pending)
+$ # FOR UPDATE removed from lockDocument() and from the line lock in ReceiptsService (not committed)
+$ cd backend && npm test -- concurrency
+  ● concurrency (BR-14) › T-CON-01 AC-04.8 BR-14 five parallel receipts of 4 against remaining 10: exactly 2 succeed, 3 get 422
+    -   422,
+    -   422,
+    -   422,
+    +   500,
+    +   500,
+    +   500,
+  ● concurrency (BR-14) › T-CON-03 BR-14 a receipt and a cancel in parallel on an OPEN document: exactly one wins, never cancelled with stock
+    Expected: 409
+    Received: 500
+Tests:       2 failed, 4 passed, 6 total
 ```
+
+Without the locks the database CHECK constraints still stop the over-receipt and the receipt on a cancelled document, but as 500s instead of 422 / 409. The other four tests do not depend on these two locks: T-IDM-03 is held by the unique `idempotency_key`, T-CON-02 by the row lock the balance `UPDATE` takes, and T-CON-04 by complete's own "every line fully received" check, which a late receipt can only make true, never false.
 
 ### 4.5 Clean-start deployment and health check (T-HLT-01, NFR-05, NFR-08)
 Fresh stack (new named volume), configuration taken unchanged from `.env.example`. Show: all containers healthy, `/health` returns 200, migrations and seed on first start, the same after `docker compose restart api` (re-run safely), login returns 200, SPA fallback serves `index.html`, the API runs as the non-root `node` user.
