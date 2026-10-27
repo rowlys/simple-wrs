@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InventoryBalance, Prisma, Product as ProductRow } from '@prisma/client';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCode } from '../../common/errors/error-code';
-import { Page, paginate } from '../../common/pagination/pagination';
+import { escapeLike, Page, paginate } from '../../common/pagination/pagination';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateProductRequest, ListProductsQuery, Product } from './dto/product.dto';
 
@@ -23,8 +23,7 @@ export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list({ search, ...pageQuery }: ListProductsQuery): Promise<Page<Product>> {
-    // Prisma passes `contains` to ILIKE unescaped (D-14), so escape PostgreSQL's LIKE escape and wildcards.
-    const text = search?.replace(/[\\%_]/g, '\\$&');
+    const text = search && escapeLike(search);
     const where: Prisma.ProductWhereInput = text
       ? {
           OR: [

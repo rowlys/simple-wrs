@@ -1,7 +1,7 @@
 import { Controller, Get, INestApplication, Post } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp } from './app';
-import { createUser, truncateAll } from './db';
+import { createTestApp, createUsersAndLogin, TestUsers } from './app';
+import { truncateAll } from './db';
 import { Roles } from '../src/common/auth/decorators';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -24,23 +24,18 @@ class RolesTestController {
 describe('authorization (FR-03, spec §8)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const tokens: Record<string, string> = {};
+  let users: TestUsers;
 
   beforeAll(async () => {
     ({ app, prisma } = await createTestApp({ controllers: [RolesTestController] }));
     await truncateAll(prisma);
-    await createUser(prisma, { username: 'operator', password: 'op-pass', role: 'OPERATOR' });
-    await createUser(prisma, { username: 'supervisor', password: 'sup-pass', role: 'SUPERVISOR' });
-    for (const [username, password] of [['operator', 'op-pass'], ['supervisor', 'sup-pass']]) {
-      const res = await request(app.getHttpServer()).post('/api/v1/auth/login').send({ username, password });
-      tokens[username] = res.body.accessToken;
-    }
+    users = await createUsersAndLogin(app, prisma);
   });
   afterAll(() => app.close());
 
-  const call = (method: 'get' | 'post', path: string, user?: string) => {
+  const call = (method: 'get' | 'post', path: string, user?: keyof TestUsers) => {
     const req = request(app.getHttpServer())[method](`/api/v1/roles-test/${path}`);
-    return user ? req.set('Authorization', `Bearer ${tokens[user]}`) : req;
+    return user ? req.set('Authorization', `Bearer ${users[user].token}`) : req;
   };
 
   it('AC-01.4 FR-03 an operator calling a @Roles(SUPERVISOR) handler gets 403 FORBIDDEN', async () => {
@@ -55,7 +50,7 @@ describe('authorization (FR-03, spec §8)', () => {
   });
 
   it('FR-03 spec §8 a handler without @Roles allows any authenticated role', async () => {
-    for (const user of ['operator', 'supervisor']) {
+    for (const user of ['operator', 'supervisor'] as const) {
       const res = await call('get', 'any-role', user);
       expect({ user, status: res.status }).toEqual({ user, status: 200 });
     }

@@ -1,11 +1,9 @@
 import { Transform } from 'class-transformer';
 import { IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
 import { PageQueryDto } from '../../../common/pagination/pagination';
+import { trim, trimToNull } from '../../../common/transforms';
 
 // Shapes mirror docs/openapi.yaml: CreateProductRequest, Product, and the GET /products query.
-
-// Non-strings pass through untouched so @IsString reports them.
-const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
 export class CreateProductRequest {
   // BR-01: normalized before validation, so `  frz-1  ` is valid and `abc-1` collides with `ABC-1` (BR-02).
@@ -26,8 +24,7 @@ export class CreateProductRequest {
   @Length(1, 20)
   unitOfMeasure!: string;
 
-  // An empty or whitespace-only description is stored as null (docs/ai-workflow.md D-12).
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || null : value))
+  @Transform(trimToNull)
   @IsOptional()
   @IsString()
   @MaxLength(1000)

@@ -1,33 +1,29 @@
 import { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { createTestApp } from './app';
-import { createUser, truncateAll } from './db';
+import { createTestApp, createUsersAndLogin, TestUsers } from './app';
+import { truncateAll } from './db';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('products (US-02)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const tokens: Record<string, string> = {};
+  let users: TestUsers;
 
   beforeAll(async () => ({ app, prisma } = await createTestApp()));
   beforeEach(async () => {
     await truncateAll(prisma);
-    await createUser(prisma, { username: 'operator', password: 'op-pass', role: 'OPERATOR' });
-    await createUser(prisma, { username: 'supervisor', password: 'sup-pass', role: 'SUPERVISOR' });
-    for (const [username, password] of [['operator', 'op-pass'], ['supervisor', 'sup-pass']]) {
-      const res = await request(app.getHttpServer()).post('/api/v1/auth/login').send({ username, password });
-      tokens[username] = res.body.accessToken;
-    }
+    users = await createUsersAndLogin(app, prisma);
   });
   afterAll(() => app.close());
 
-  const create = (body: object, as = 'supervisor') =>
-    request(app.getHttpServer()).post('/api/v1/products').set('Authorization', `Bearer ${tokens[as]}`).send(body);
-  const list = (query: Record<string, string | number> = {}, as = 'operator') =>
-    request(app.getHttpServer()).get('/api/v1/products').query(query).set('Authorization', `Bearer ${tokens[as]}`);
-  const get = (id: string, as = 'operator') =>
-    request(app.getHttpServer()).get(`/api/v1/products/${id}`).set('Authorization', `Bearer ${tokens[as]}`);
+  type As = keyof TestUsers;
+  const create = (body: object, as: As = 'supervisor') =>
+    request(app.getHttpServer()).post('/api/v1/products').set('Authorization', `Bearer ${users[as].token}`).send(body);
+  const list = (query: Record<string, string | number> = {}, as: As = 'operator') =>
+    request(app.getHttpServer()).get('/api/v1/products').query(query).set('Authorization', `Bearer ${users[as].token}`);
+  const get = (id: string, as: As = 'operator') =>
+    request(app.getHttpServer()).get(`/api/v1/products/${id}`).set('Authorization', `Bearer ${users[as].token}`);
 
   const valid = { sku: 'frz-chk-001', name: 'Frozen Chicken Breast 1kg', unitOfMeasure: 'CTN' };
   const isoDate = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
