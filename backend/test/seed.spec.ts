@@ -4,13 +4,21 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { truncateAll } from './db';
 
-// Runs the seed exactly as the container will (`npm run seed`), against wrs_test.
+// The `npm run seed` command, as the container runs it (it has no .env file), against wrs_test. The flag that
+// loads a developer's backend/.env is dropped (D-35): it would fill in the passwords a test leaves unset.
+const SEED_COMMAND = (require('../package.json') as { scripts: { seed: string } }).scripts.seed.replace(' --env-file-if-exists=.env', '');
+
 function runSeed(passwords: { SEED_SUPERVISOR_PASSWORD?: string; SEED_OPERATOR_PASSWORD?: string }) {
   const env = { ...process.env, ...passwords };
   if (!passwords.SEED_SUPERVISOR_PASSWORD) delete env.SEED_SUPERVISOR_PASSWORD;
   if (!passwords.SEED_OPERATOR_PASSWORD) delete env.SEED_OPERATOR_PASSWORD;
-  return spawnSync('npm', ['run', 'seed'], { cwd: join(__dirname, '..'), env, shell: true, encoding: 'utf8' });
+  return spawnSync(SEED_COMMAND, { cwd: join(__dirname, '..'), env, shell: true, encoding: 'utf8' });
 }
+
+it('A-08 D-35 the seed command used by these tests is the package.json one without the env-file flag', () => {
+  expect(SEED_COMMAND).toMatch(/^node .*prisma\/seed\.ts$/);
+  expect(SEED_COMMAND).not.toContain('env-file');
+});
 
 describe('seed (A-08, spec §3.3 step 6, §3.4)', () => {
   const prisma = new PrismaClient();

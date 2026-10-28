@@ -36,6 +36,8 @@ If two disagree, stop and say so. Never invent behaviour.
 - Frontend tests: `cd frontend && npm test`
 - E2E: `npm run test:e2e` (stack running)
 - Full stack: `docker compose up --build -d` → http://localhost:8080
+- Backend on this machine: `docker compose up -d db`, then `cd backend && npm run dev`
+  (needs `backend/.env`, copied from `backend/.env.example`) → http://localhost:3000
 
 ## After each change
 Run the affected tests plus the full backend suite, then add a row to the

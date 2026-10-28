@@ -25,6 +25,7 @@
 | Full stack + demo data to try by hand | `docker compose up --build -d`, then `docker compose exec api npm run seed:demo`; the app at `http://localhost:8080`, Swagger UI at `http://localhost:8080/api/docs` | `.env` with `SEED_ON_START=true` and the seed passwords (D-27, D-32) |
 | Frontend unit | `cd frontend && npm ci && npm test` | — |
 | Frontend dev server | `cd frontend && npm run dev` (http://localhost:5173) | full stack running; API calls go through its nginx on `WEB_PORT` |
+| Backend on this machine (watch mode) | `cd backend && npm run dev` (applies pending migrations, then http://localhost:3000, Swagger UI at `/api/docs`); `npm run seed`, `npm run seed:demo` use the same file | `docker compose up -d db` and `backend/.env` (copy from `backend/.env.example`, D-35) |
 | End-to-end | `npm ci && npx playwright install chromium && npm run test:e2e` (repo root) | full stack running: `docker compose up --build -d`; demo passwords in `.env` |
 
 ## 3. Test catalogue

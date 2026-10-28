@@ -3,5 +3,6 @@
 **/dist
 **/coverage
 .git
-.env
-**/.env.test
+# Every env file (.env, .env.test, .env.local, …) holds real values; only the committed templates may go in.
+**/.env*
+!**/*.example

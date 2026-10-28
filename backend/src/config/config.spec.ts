@@ -37,10 +37,24 @@ describe('config (spec §8, §10)', () => {
     expect(() => loadConfig(env)).toThrow(message);
   });
 
-  it('NFR-02 the JWT_SECRET placeholder in .env.example is rejected, so a forgotten secret cannot start the API', () => {
-    const example = parseEnv(readFileSync(join(__dirname, '..', '..', '..', '.env.example'), 'utf8'));
+  const readExample = (...path: string[]) => parseEnv(readFileSync(join(__dirname, '..', '..', ...path), 'utf8'));
+
+  it.each([
+    ['.env.example', ['..', '.env.example']],
+    ['backend/.env.example', ['.env.example']],
+  ])('NFR-02 the JWT_SECRET placeholder in %s is rejected, so a forgotten secret cannot start the API', (_file, path) => {
+    const example = readExample(...path);
     expect(example.JWT_SECRET).toEqual(expect.any(String));
     expect(() => loadConfig({ ...valid, JWT_SECRET: example.JWT_SECRET })).toThrow(/JWT_SECRET/);
+  });
+
+  it('NFR-08 spec §10 D-35 backend/.env.example sets everything a local API and seed need, with the database on 127.0.0.1', () => {
+    const example = readExample('.env.example');
+    expect(() => loadConfig({ ...example, JWT_SECRET: 's'.repeat(32) })).not.toThrow();
+    expect(new URL(example.DATABASE_URL!).hostname).toBe('127.0.0.1'); // the Compose db, published on the host
+    // seed:demo calls the API it is given, so API_URL must name the PORT the local API listens on.
+    expect(new URL(example.API_URL!).port).toBe(example.PORT);
+    expect(example).toEqual(expect.objectContaining({ SEED_SUPERVISOR_PASSWORD: expect.any(String), SEED_OPERATOR_PASSWORD: expect.any(String) }));
   });
 
   describe('app startup', () => {
