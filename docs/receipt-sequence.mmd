@@ -15,12 +15,13 @@ sequenceDiagram
   end
   G->>S: recordReceipt(d, i, quantity, key, user)
   S->>DB: BEGIN
+  S->>DB: SELECT document FOR UPDATE
+  Note over S,DB: the key lookup runs under the lock, so a duplicate that waited sees its twin's receipt (D-24)
   S->>DB: SELECT receipt WHERE idempotency_key = key
   alt key already used
     S->>DB: COMMIT
     S-->>UI: 200 original result (same line + qty) or 409 IDEMPOTENCY_KEY_REUSED
   end
-  S->>DB: SELECT document FOR UPDATE
   S->>S: status in (OPEN, IN_PROGRESS)? else 409
   S->>DB: SELECT item FOR UPDATE
   S->>S: quantity <= expected - received? else 422

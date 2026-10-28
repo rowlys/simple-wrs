@@ -45,7 +45,7 @@ Levels: **U** unit, **I** integration/API (Supertest + PostgreSQL), **E** end-to
 | T-RCV-07 | — | I | Item ID that belongs to another document | 404 `NOT_FOUND` |
 | T-IDM-01 | AC-04.6, BR-09 | I | Same request + key sent twice in sequence | 201 then 200 with same receipt id and `Idempotent-Replayed: true`; stock counted once |
 | T-IDM-02 | AC-04.7, BR-09 | I | Same key, different quantity / different line | 409 `IDEMPOTENCY_KEY_REUSED`; nothing changed |
-| T-IDM-03 | BR-09, spec §6 step 15 | I | Same request + key sent twice **in parallel** | exactly one receipt; one 201 and one 200 |
+| T-IDM-03 | BR-09, spec §6 step 6 (D-24) | I | Same request + key sent twice **in parallel** | exactly one receipt; one 201 and one 200 |
 | T-CON-01 | AC-04.8, BR-14 | I | 5 parallel receipts of 4 against remaining 10 | exactly 2 × 201, 3 × 422; received 8; on-hand +8 |
 | T-CON-02 | BR-12, BR-14 | I | 20 parallel receipts of 1 across 2 documents for the same product | on-hand +20 exactly; ledger has 20 rows; balances reconcile |
 | T-CON-03 | BR-14 | I | Receipt and cancel in parallel on an OPEN document | exactly one succeeds; never "cancelled with stock received" |

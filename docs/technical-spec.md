@@ -373,8 +373,8 @@ Body: `{ "quantity": 40 }`
 | 2 | RolesGuard | Role ∈ {OPERATOR, SUPERVISOR} | 403 `FORBIDDEN` |
 | 3 | ValidationPipe / controller | `documentId`, `itemId` are UUIDs; `quantity` is integer 1–1,000,000; `Idempotency-Key` present, 8–100 chars, `[A-Za-z0-9_-]` | 400 `VALIDATION_ERROR` |
 | 4 | ReceiptsService | **Begin transaction** (`prisma.$transaction(async tx => …)`, isolation READ COMMITTED, timeout 10 s) | |
-| 5 | | Look up receipt by idempotency key. If found: if same `itemId` and `quantity` → **commit, return 200** with the original result and header `Idempotent-Replayed: true`; else → 409 `IDEMPOTENCY_KEY_REUSED` | 409 |
-| 6 | | `SELECT … FROM receiving_documents WHERE id = $1 FOR UPDATE` | 404 `NOT_FOUND` |
+| 5 | | `SELECT … FROM receiving_documents WHERE id = $1 FOR UPDATE` | 404 `NOT_FOUND` |
+| 6 | | Look up receipt by idempotency key, under the document lock (D-24). If found: if same `itemId` and `quantity` → **commit, return 200** with the original result and header `Idempotent-Replayed: true`; else → 409 `IDEMPOTENCY_KEY_REUSED` | 409 |
 | 7 | | Status must be `OPEN` or `IN_PROGRESS` | 409 `INVALID_DOCUMENT_STATUS` |
 | 8 | | `SELECT … FROM receiving_items WHERE id = $2 AND receiving_document_id = $1 FOR UPDATE` | 404 `NOT_FOUND` |
 | 9 | | `remaining = expected_quantity − received_quantity`; if `quantity > remaining` | 422 `QUANTITY_EXCEEDS_REMAINING` (details: remaining, requested) |
@@ -383,15 +383,16 @@ Body: `{ "quantity": 40 }`
 | 12 | | `UPDATE inventory_balances SET quantity_on_hand = quantity_on_hand + $q, updated_at = now() WHERE product_id = $p RETURNING quantity_on_hand` (the UPDATE takes the row lock) | |
 | 13 | | `INSERT INTO inventory_transactions (type 'RECEIPT', quantity_change $q, balance_after <returned>, receipt_id, receiving_document_id, created_by_id)` | |
 | 14 | | If document status is `OPEN` → set `IN_PROGRESS`, `updated_at = now()` | |
-| 15 | | **Commit.** If the insert in step 10 raised a unique violation on `idempotency_key` (two identical requests raced), the transaction is rolled back and the service re-runs step 5 once, outside the failed transaction, returning the replay or 409. | |
+| 15 | | **Commit.** If the insert in step 10 raised a unique violation on `idempotency_key`, the same key was committed meanwhile by a receipt on another document (two requests on the same document cannot get here: the second waits for the lock in step 5 and finds the first in step 6). The transaction is rolled back and the service re-runs step 6 once, outside the failed transaction, which returns 409 `IDEMPOTENCY_KEY_REUSED`. | |
 | 16 | Controller | 201 with `ReceiptResult`: `{ receipt, item (with remainingQuantity, isFullyReceived), document: { id, documentNumber, status, allItemsReceived }, inventory: { productId, quantityOnHand } }` | |
 
 **Concurrency reasoning.**
-- The document row lock (step 6) serializes receipts with `complete`, `close-short`, `cancel` and reversals on the same document, so a document cannot change status while a receipt is half-done.
+- The document row lock (step 5) serializes receipts with `complete`, `close-short`, `cancel` and reversals on the same document, so a document cannot change status while a receipt is half-done.
 - The item row lock (step 8) means a second receipt on the same line waits, then re-reads the *updated* `received_quantity` before its check in step 9. This is what makes BR-14 / AC-04.8 hold.
 - **Lock order is always document → item → balance.** Every write path follows this order, which prevents deadlocks.
 - The `CHECK (received_quantity <= expected_quantity)` constraint is the last line of defence: if a code bug ever skipped the lock, the database rejects the write and the whole transaction rolls back.
-- Idempotency is enforced by the `UNIQUE (idempotency_key)` constraint, not only by the lookup in step 5, so a race cannot create two receipts.
+- The key lookup (step 6) runs under the document lock, so a duplicate request that waited for the lock sees the receipt its twin just committed and replays it. Looked up before the lock, a double submit of the whole remaining quantity would see nothing, wait, and then fail step 9 with 422 for a receipt that was recorded (D-24).
+- Idempotency is enforced by the `UNIQUE (idempotency_key)` constraint, not only by the lookup in step 6, so a race cannot create two receipts.
 
 **Frontend side.** `ReceiveForm` generates one key with `crypto.randomUUID()` when the form is shown, reuses it for retries of the same submission (e.g. timeout, double-click), and generates a new key only after a success or after the user changes the quantity. The submit button is disabled while the request is in flight.
 

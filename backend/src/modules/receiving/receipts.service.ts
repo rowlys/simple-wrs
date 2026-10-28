@@ -65,7 +65,7 @@ async function moveStock(tx: Tx, move: StockMove): Promise<void> {
   await tx.inventoryTransaction.create({ data: { ...move, balanceAfter: quantityOnHand } });
 }
 
-// Spec §6 step 5 (BR-09): the id of the receipt already recorded with this key for this same request, or null
+// Spec §6 step 6 (BR-09): the id of the receipt already recorded with this key for this same request, or null
 // when the key is new. A key used for another line or quantity is 409 (D-21: the line must be on this document).
 async function replayedReceipt(db: Tx, { documentId, itemId, quantity, idempotencyKey }: ReceiptRequest): Promise<string | null> {
   const earlier = await db.receipt.findUnique({
@@ -92,7 +92,7 @@ export class ReceiptsService {
       replayId = outcome;
     } catch (e) {
       // Step 15: the unique key rejected the insert because the same key was committed meanwhile under another
-      // document's lock. The failed transaction is rolled back; step 5 runs once more and now sees that receipt.
+      // document's lock. The failed transaction is rolled back; step 6 runs once more and now sees that receipt.
       if (uniqueViolation(e) !== 'Receipt:idempotency_key') throw e;
       const id = await replayedReceipt(this.prisma, request);
       if (!id) throw e;
@@ -156,8 +156,8 @@ export class ReceiptsService {
     const { documentId, itemId, quantity, idempotencyKey } = request;
     const { status, now } = await lockDocument(tx, documentId);
 
-    // Step 5 runs after the document lock (D-24): a duplicate that waited for the lock must see the receipt its
-    // twin just committed, before the remaining or status checks below would reject it.
+    // Step 6 runs right after the document lock (step 5, D-24): a duplicate that waited for the lock must see the
+    // receipt its twin just committed, before the remaining or status checks below would reject it.
     const replayId = await replayedReceipt(tx, request);
     if (replayId) return replayId;
     assertCan('RECEIVE', status);
