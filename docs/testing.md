@@ -126,11 +126,26 @@ Real `wrs_test` PostgreSQL database, no mocks of the database or Prisma.
 
 ```
 $ cd backend && npm test -- --coverage
-(pending)
+Test Suites: 16 passed, 16 total
+Tests:       336 passed, 336 total
+Time:        171.699 s
+File                                | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+All files                           |      98 |     93.4 |   99.35 |   98.73 |
+  … every file below 100 % lines or branches:
+  main.ts                           |   76.19 |       50 |   66.66 |   78.94 | 28-31
+  all-exceptions.filter.ts          |     100 |    96.77 |     100 |     100 | 40
+  prisma-errors.ts                  |     100 |       75 |     100 |     100 | 7-8
+  receipts.service.ts               |   94.59 |    89.65 |     100 |   95.16 | 97-99
+  app.ts                            |   96.15 |    85.71 |     100 |     100 | 34      (test helper)
+  env.ts                            |   76.92 |       50 |     100 |    90.9 | 15      (test helper)
+  fixtures.ts                       |      92 |       75 |     100 |     100 | 26-28   (test helper)
 
 $ cd frontend && npm test
-(pending)
+ Test Files  12 passed (12)
+      Tests  48 passed (48)
 ```
+
+2026-10-28, instruction #10, after the D-24 spec change (comments only in `receipts.service.ts`). The uncovered lines are `bootstrap()` in `main.ts` (the tests start the app through `configureApp`) and, in `receipts.service.ts` 97–99, the spec §6 step 15 path: the same key used on two different documents at the same moment. No test drives that race yet (§5 L-10).
 
 2026-10-28, instruction #8, frontend unit tests (Vitest + Testing Library, `fetch` stubbed; the backend is covered by the integration suite above):
 
@@ -146,15 +161,69 @@ Names include T-FE-01 (`can()` against the spec §8 matrix), T-FE-02 (three test
 Each test also runs `assertInventoryConsistent()` afterwards: for every product, on-hand equals the sum of its ledger rows (BR-12), and every line's received quantity equals the sum of its non-reversed receipts (BR-13).
 
 ```
-(pending)
+$ cd backend && npx jest --runInBand --json -t "<IDs above>"    # names and results from the JSON report
+✓ T-INV-01 AC-06.1 FR-40 receipts of 40 and 60 show on-hand 100; products without stock show 0
+✓ T-INV-02 AC-06.2 FR-41 filtered by product: two RECEIPT rows newest first with document number and user
+✓ T-INV-03 AC-06.3 BR-12 for every product, on-hand equals the sum of its ledger changes
+✓ T-RCV-01 AC-04.1 FR-31 receiving 40 of 100 on an OPEN document updates line, stock, ledger and status
+✓ T-RCV-02 AC-04.2 FR-32 FR-34 receiving the remaining 60 makes the line fully received
+✓ T-REV-01 AC-08.1 FR-37 reversing the only receipt: kept with its reversal, stock back to 0, document OPEN
+✓ T-REV-02 AC-08.2 receiving 10 after the full reversal: IN_PROGRESS, ledger +100, −100, +10
+✓ T-REV-03 AC-08.3 receipts 40 and 60, reversing the 60: received 40, on-hand −60, still IN_PROGRESS
+Tests: 8 passed, 0 failed (328 other tests skipped by -t)
 ```
+
+2026-10-28, instruction #10. `-t` was "T-RCV-0[12]|T-INV-0[1-3]|T-REV-0[1-3]".
 
 ### 4.3 Duplicate and invalid operations do not corrupt stock (T-RCV-03–07, T-IDM-01–03, T-REV-04–06, T-DB-01–03)
 "Nothing changes" in a test name means the test compares line, balance, ledger and receipt rows before and after the rejected call. The database tests insert by raw SQL, bypassing the API.
 
 ```
-(pending)
+$ cd backend && npx jest --runInBand --json -t "<IDs above>"    # names and results from the JSON report
+✓ BR-12 T-DB-02 rejects a negative on-hand quantity (ib_non_negative_chk)
+✓ BR-13 T-DB-01 rejects received_quantity above expected_quantity (ri_received_range_chk)
+✓ BR-19 T-DB-03 rejects a second reversal of the same receipt (unique receipt_reversals.receipt_id)
+✓ T-IDM-01 AC-04.6 the same request and key again is 200 with the same receipt and changes nothing
+✓ T-IDM-01 D-22 a replay after the document was completed is still 200 with the original receipt
+✓ T-IDM-02 AC-04.7 the key with another quantity or another line is 409 IDEMPOTENCY_KEY_REUSED and nothing changes
+✓ T-IDM-03 BR-09 FR-33 a double submit of the whole remaining quantity is one 201 and one 200 replay
+✓ T-IDM-03 BR-09 the same request and key sent twice in parallel records one receipt: one 201, one 200
+✓ T-RCV-03 AC-04.3 BR-07 receiving 61 with 60 remaining is 422 QUANTITY_EXCEEDS_REMAINING and nothing changes
+✓ T-RCV-04 AC-04.4 BR-07 quantity -1 is 400 VALIDATION_ERROR naming quantity and nothing changes
+✓ T-RCV-04 AC-04.4 BR-07 quantity "4" is 400 VALIDATION_ERROR naming quantity and nothing changes
+✓ T-RCV-04 AC-04.4 BR-07 quantity "ten" is 400 VALIDATION_ERROR naming quantity and nothing changes
+✓ T-RCV-04 AC-04.4 BR-07 quantity 0 is 400 VALIDATION_ERROR naming quantity and nothing changes
+✓ T-RCV-04 AC-04.4 BR-07 quantity 1.5 is 400 VALIDATION_ERROR naming quantity and nothing changes
+✓ T-RCV-04 AC-04.4 BR-07 quantity 1000001 is 400 VALIDATION_ERROR naming quantity and nothing changes
+✓ T-RCV-04 AC-04.4 BR-07 quantity null is 400 VALIDATION_ERROR naming quantity and nothing changes
+✓ T-RCV-04 AC-04.4 BR-07 quantity undefined is 400 VALIDATION_ERROR naming quantity and nothing changes
+✓ T-RCV-05 AC-04.5 BR-08 receiving on a CANCELLED document is 409 INVALID_DOCUMENT_STATUS and nothing changes
+✓ T-RCV-05 AC-04.5 BR-08 receiving on a CLOSED_SHORT document is 409 INVALID_DOCUMENT_STATUS and nothing changes
+✓ T-RCV-05 AC-04.5 BR-08 receiving on a COMPLETED document is 409 INVALID_DOCUMENT_STATUS and nothing changes
+✓ T-RCV-05 AC-04.5 BR-08 receiving on a DRAFT document is 409 INVALID_DOCUMENT_STATUS and nothing changes
+✓ T-RCV-06 BR-09 Idempotency-Key "has space!" is 400 VALIDATION_ERROR naming the header and nothing changes
+✓ T-RCV-06 BR-09 Idempotency-Key "key/with/slash" is 400 VALIDATION_ERROR naming the header and nothing changes
+✓ T-RCV-06 BR-09 Idempotency-Key "k×101" is 400 VALIDATION_ERROR naming the header and nothing changes
+✓ T-RCV-06 BR-09 Idempotency-Key "short-7" is 400 VALIDATION_ERROR naming the header and nothing changes
+✓ T-RCV-06 BR-09 Idempotency-Key null is 400 VALIDATION_ERROR naming the header and nothing changes
+✓ T-RCV-06 BR-09 keys of 8 and 100 characters from [A-Za-z0-9_-] are accepted
+✓ T-RCV-07 a line of another document is 404 NOT_FOUND; unknown and non-UUID ids are 404 and 400
+✓ T-REV-04 AC-08.4 BR-19 reversing the same receipt again is 409 RECEIPT_ALREADY_REVERSED and nothing changes
+✓ T-REV-05 AC-08.5 BR-18 reversing a receipt of a CLOSED_SHORT document is 409 INVALID_DOCUMENT_STATUS and nothing changes
+✓ T-REV-05 AC-08.5 BR-18 reversing a receipt of a COMPLETED document is 409 INVALID_DOCUMENT_STATUS and nothing changes
+✓ T-REV-05 AC-08.5 BR-18 reversing a receipt of a OPEN document is 409 INVALID_DOCUMENT_STATUS and nothing changes
+✓ T-REV-06 AC-08.6 an operator gets 403 FORBIDDEN and nothing changes
+✓ T-REV-06 AC-08.6 BR-17 reversing with {"reason": "   "} is 400 VALIDATION_ERROR naming reason and nothing changes
+✓ T-REV-06 AC-08.6 BR-17 reversing with {"reason": " ab "} is 400 VALIDATION_ERROR naming reason and nothing changes
+✓ T-REV-06 AC-08.6 BR-17 reversing with {"reason": ""} is 400 VALIDATION_ERROR naming reason and nothing changes
+✓ T-REV-06 AC-08.6 BR-17 reversing with {"reason": "r×501"} is 400 VALIDATION_ERROR naming reason and nothing changes
+✓ T-REV-06 AC-08.6 BR-17 reversing with {"reason": 5} is 400 VALIDATION_ERROR naming reason and nothing changes
+✓ T-REV-06 AC-08.6 BR-17 reversing with {} is 400 VALIDATION_ERROR naming reason and nothing changes
+✓ T-REV-06 AC-08.6 BR-18 a receipt of another document, unknown and non-UUID ids are 404 / 400; nothing changes
+Tests: 40 passed, 0 failed (296 other tests skipped by -t)
 ```
+
+2026-10-28, instruction #10. `-t` was "T-RCV-0[3-7]|T-IDM-0[1-3]|T-REV-0[4-6]|T-DB-0[1-3]"; `k×101` and `r×501` stand for a key of 101 and a reason of 501 repeated letters, one over each limit.
 
 ### 4.4 Concurrency stress, 10 consecutive runs (T-CON-01–06)
 All requests over HTTP against one listening server, real `wrs_test` database. `assertInventoryConsistent()` runs after every test.
@@ -213,11 +282,42 @@ Without the locks the database CHECK constraints still stop the over-receipt and
 ### 4.5 Clean-start deployment and health check (T-HLT-01, NFR-05, NFR-08)
 Fresh stack (new named volume), configuration taken unchanged from `.env.example`. Show: all containers healthy, `/health` returns 200, migrations and seed on first start, the same after `docker compose restart api` (re-run safely), login returns 200, SPA fallback serves `index.html`, the API runs as the non-root `node` user.
 
+2026-10-28, instruction #10, on a fresh `git clone` at 0b057db with a new named volume (`wrs-clean-clone_db-data`). `.env` is `.env.example` with only its `change-me` values replaced (the `JWT_SECRET` placeholder is deliberately too short to start with, ai-workflow.md §7 #1) and `SEED_ON_START=true`, as the README says.
+
 ```
-(pending)
+$ docker compose up --build -d && docker compose ps
+SERVICE   STATUS                    PORTS
+api       Up 12 seconds (healthy)   3000/tcp
+db        Up 17 seconds (healthy)   127.0.0.1:5432->5432/tcp
+web       Up 6 seconds (healthy)    0.0.0.0:8080->80/tcp, [::]:8080->80/tcp
+$ docker compose logs api | grep -E "Applying|applied|Seed complete|successfully started"
+Applying migration `20261027133252_init`
+The following migration(s) have been applied:
+Seed complete: 2 users, 5 products
+[Nest] 1  - 10/28/2026, 1:27:11 AM     LOG [NestApplication] Nest application successfully started +2ms
+$ curl -s -w " %{http_code}\n" http://localhost:8080/health
+{"status":"ok","database":"up"} 200
+$ curl -s -o /dev/null -w "%{http_code} %{content_type}\n" http://localhost:8080/receiving/abc     # SPA fallback
+200 text/html
+$ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/v1/auth/login …      # seeded supervisor
+200
+$ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/docs/
+200
+$ docker compose restart api && docker compose logs api --since 1m | grep -E "No pending|Applying|Seed complete"
+ Container wrs-clean-clone-api-1  Started
+Applying migration `20261027133252_init`          ← first start (inside the 1-minute window)
+Seed complete: 2 users, 5 products
+No pending migrations to apply.                   ← after the restart: nothing re-applied
+Seed complete: 2 users, 5 products                ← upserts, safe to repeat
+$ curl -s -w " %{http_code}\n" http://localhost:8080/health
+{"status":"ok","database":"up"} 200
+$ docker compose exec api id -un
+node
 ```
 
-Partial check, 2026-10-28, instruction #8, on the **existing** stack and volume (a fresh volume would have deleted the demo data). Not shown yet: a first start from `.env.example`, which needs its `change-me` values replaced (the `JWT_SECRET` placeholder is deliberately too short, §7 #1).
+Earlier the same day, before the four tasks of instruction #10, the same checks passed in a separate Compose project with its own volume, plus `docker compose build --no-cache --pull` of both images, a 403 for an operator opening a document, a 201 then 200 replay of one receipt, and no env file in either image.
+
+Partial check, 2026-10-28, instruction #8, on the **existing** stack and volume (a fresh volume would have deleted the demo data). Not shown yet: a first start from `.env.example`, which needs its `change-me` values replaced (the `JWT_SECRET` placeholder is deliberately too short, ai-workflow.md §7 #1).
 
 ```
 $ docker compose up --build -d && docker compose ps
@@ -240,22 +340,84 @@ $ docker compose up -d --force-recreate api; curl -s -w ' %{http_code}' http://l
 Playwright (Chromium) against the Compose stack via nginx on `localhost:8080`. Two consecutive runs on the same stack, to show the specs can repeat.
 
 ```
-(pending)
+$ npm ci
+found 0 vulnerabilities
+$ npx playwright install chromium
+$ npm run test:e2e     # run 1
+Running 2 tests using 1 worker
+  ✓  1 [chromium] › e2e\receiving.spec.ts:45:5 › T-E2E-01 US-03 → US-06 a supervisor creates and opens a document, an operator receives it in two counts, the supervisor completes it; inventory and history show the totals (3.4s)
+  ✓  2 [chromium] › e2e\receiving.spec.ts:116:5 › T-E2E-02 AC-02.5 an operator does not see "New product" (639ms)
+  2 passed (5.9s)
+$ npm run test:e2e     # run 2
+Running 2 tests using 1 worker
+  ✓  1 [chromium] › e2e\receiving.spec.ts:45:5 › T-E2E-01 US-03 → US-06 a supervisor creates and opens a document, an operator receives it in two counts, the supervisor completes it; inventory and history show the totals (3.5s)
+  ✓  2 [chromium] › e2e\receiving.spec.ts:116:5 › T-E2E-02 AC-02.5 an operator does not see "New product" (495ms)
+  2 passed (5.2s)
 ```
+
+2026-10-28, instruction #10, Playwright 1.64.1, on the clean-clone stack of §4.5 after `npm run seed:demo`. The specs check features that were already built, so there was no failing-first run against missing code; the first run failed on a test selector (a Mantine Select labels its option list like its input) and passed once the selector named the textbox.
 
 ### 4.7 README on a clean clone
 Fresh `git clone` into a new folder, then the README's commands exactly as written: start the stack, run every test suite, start local development.
 
+2026-10-28, instruction #10. The stack part is §4.5 and the E2E part §4.6 (same clone). The first pass, at 0b057db, **failed**: `npm ci` does not generate the Prisma client on a fresh checkout, so every backend suite stopped at `TS2305: Module '"@prisma/client"' has no exported member 'ReceivingStatus'` (the working copy still had a client from earlier, which hid it). The README and §2 now run `npx prisma generate` after `npm ci` (40ba49e); the clone was pulled and the steps rerun:
+
 ```
-(pending)
+$ docker compose exec api npm run seed:demo
+Demo data created: 7 receiving documents (DRAFT, OPEN, 2 × IN_PROGRESS, COMPLETED, CLOSED_SHORT, CANCELLED)
+
+$ docker compose up -d db
+$ cp backend/.env.test.example backend/.env.test    # POSTGRES_PASSWORD from .env put in DATABASE_URL
+$ cd backend && npm ci && npx prisma generate && npm test
+✔ Generated Prisma Client (v6.19.3) to .\node_modules\@prisma\client in 182ms
+Test Suites: 16 passed, 16 total
+Tests:       336 passed, 336 total
+Time:        196.564 s
+
+$ cd frontend && npm ci && npm test
+ Test Files  12 passed (12)
+      Tests  48 passed (48)
+
+$ cp backend/.env.example backend/.env              # change-me values replaced
+$ cd backend && npm run dev
+No pending migrations to apply.
+[Nest] 18976  - 28/10/2026, 08.40.45     LOG [NestApplication] Nest application successfully started +1ms
+$ curl -s -w " %{http_code}\n" http://localhost:3000/health
+{"status":"ok","database":"up"} 200
+$ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/docs/
+200
+$ npm run seed
+Seed complete: 2 users, 5 products
+
+$ cd frontend && npm run dev                        # 5173 was taken by another project on this machine; Vite chose 5174
+$ curl -s -o /dev/null -w "%{http_code} %{content_type}\n" http://localhost:5174/receiving
+200 text/html
+$ curl -s -w " %{http_code}\n" http://localhost:5174/health      # proxied to the stack's nginx
+{"status":"ok","database":"up"} 200
+$ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:5174/api/v1/auth/login …      # seeded operator, through the proxy
+200
 ```
 
 ### 4.8 Manual checklist (T-MAN-01)
-- [ ] Operator sees no create/open/complete/cancel buttons
-- [ ] Over-receipt attempt shows "only N remaining" message
-- [ ] Double-clicking "Receive" records one receipt
-- [ ] Expired session returns to login
-- [ ] Pages usable at 768 px width
+2026-10-28, instruction #10, on the clean-clone stack of §4.5 with the demo data, in Chrome driven by the agent (Claude in Chrome); item 5 in Playwright's Chromium, because the Chrome window could not be resized.
+
+- [x] Operator sees no create/open/complete/cancel buttons: none on the document list ("New document" absent), on an OPEN document (no "Cancel document") or on an IN_PROGRESS one (no "Complete", "Close short"); only the Receive fields.
+- [x] Over-receipt attempt shows "only N remaining" message: with the page showing 25 remaining on CHL-MEA-005, 20 were received through the API behind its back; submitting 25 showed "Cannot receive 25 units; only 5 remaining for CHL-MEA-005." under the line, and the page refreshed to 5 remaining.
+- [x] Double-clicking "Receive" records one receipt: a double click with 7 on FRZ-VEG-004 left one receipt of 7 (received 7, remaining 193).
+- [x] Expired session returns to login: a token signed with the stack's secret and expired a minute earlier (the API answers it 401 `UNAUTHENTICATED`) was put in the tab's session; the next click (Inventory) landed on the login page.
+- [ ] Pages usable at 768 px width: **partly.** No page scrolls sideways at 768 × 1024 (below), and every action can be reached, but two defects remain (§5 L-11):
+  - Inventory transactions: the Type badge is cut to "RE…", so "Receipt" and "Reversal" differ only by colour.
+  - Document detail: the lines table is wider than the content area, so the quantity field and Receive button start at the right edge and need a sideways scroll of the table.
+
+```
+$ node check-768.cjs     # Playwright, viewport 768 × 1024, as the supervisor; document width vs viewport
+/receiving                                       page width 768 / viewport 768 ok
+/receiving/d5637ef9-a632-4f08-a68c-df2f01044fe1  page width 768 / viewport 768 ok
+/receiving/new                                   page width 768 / viewport 768 ok
+/products                                        page width 768 / viewport 768 ok
+/inventory                                       page width 768 / viewport 768 ok
+/inventory/transactions                          page width 768 / viewport 768 ok
+```
 
 ## 5. Known limitations and unresolved issues
 
@@ -270,3 +432,6 @@ Fresh `git clone` into a new folder, then the README's commands exactly as writt
 | L-7 | Users only via seed | No onboarding of new staff | User management for supervisors/admins |
 | L-8 | Lists use page/pageSize offsets (spec §4.4) | A receipt recorded while someone pages through the transaction history shifts every row by one: a row can show up on two pages or on none | Cursor paging on the ledger id (`before=<id>`), an API contract change |
 | L-9 | Ledger rows are ordered by id, but `created_at` is the transaction's start time (D-18) | A transaction that waited on a lock can be listed above a newer-looking row, and a `to` bound can include it while excluding that row | Take the timestamp after the lock, or order and filter by id only |
+| L-10 | No test drives spec §6 step 15, the same `Idempotency-Key` used on two documents at the same moment (`receipts.service.ts` 97–99 uncovered, §4.1) | The `catch` matches Prisma's error details as observed (D-04); if an upgrade changes them, this rare race answers 500 instead of 409 and no test fails | One concurrency test: two OPEN documents, one key, in parallel → one 201, one 409, one receipt |
+| L-11 | Two layout defects at 768 px (§4.8) | The transaction type reads "RE…"; on a tablet the operator scrolls the lines table sideways to reach Receive | Let the type column keep its badge width; put the receive controls first or let the lines table wrap |
+| L-12 | `npm audit --omit=dev` reports 5 high advisories in the backend: `multer` (via `@nestjs/platform-express`) and `deepmerge-ts` (via `prisma`'s config loader) | None reachable today: the API has no file upload (multer), and deepmerge-ts only merges Prisma's own config. Both fixes are major upgrades (NestJS 12, Prisma 7) | Upgrade when the stack moves to those majors |
