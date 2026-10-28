@@ -75,6 +75,7 @@ docker compose up -d db
 cp backend/.env.test.example backend/.env.test    # put POSTGRES_PASSWORD from .env in DATABASE_URL
 cd backend
 npm ci
+npx prisma generate            # the Prisma client; again after every schema change
 npm test                       # the whole suite
 npm test -- -t "BR-07"         # the tests of one rule
 npm test -- --coverage
@@ -110,6 +111,7 @@ docker compose up -d db
 cp backend/.env.example backend/.env     # put POSTGRES_PASSWORD from .env in DATABASE_URL, set the other change-me values
 cd backend
 npm ci
+npx prisma generate                      # the Prisma client (skip if you already did it for the tests)
 npm run dev                              # applies pending migrations, then http://localhost:3000 (Swagger UI at /api/docs)
 npm run seed                             # users and products, with the passwords from backend/.env
 ```

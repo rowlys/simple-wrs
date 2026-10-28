@@ -18,7 +18,7 @@
 
 | What | Command | Needs |
 |---|---|---|
-| Backend unit + integration | `cd backend && npm test` | `docker compose up -d db` and `backend/.env.test` (copy from `.env.test.example`) |
+| Backend unit + integration | `cd backend && npm test` | `docker compose up -d db`, `backend/.env.test` (copy from `.env.test.example`) and, once per checkout, `npm ci && npx prisma generate` |
 | One rule | `cd backend && npm test -- -t "BR-07"` | same |
 | Concurrency stress (10 runs) | `cd backend && for i in $(seq 10); do npm test -- concurrency \|\| exit 1; done` | same |
 | Coverage | `cd backend && npm test -- --coverage` | same |
